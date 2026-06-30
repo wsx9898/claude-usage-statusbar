@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -100,12 +101,22 @@ def fetch_official() -> ClaudeOfficial:
 
     fh = data.get("five_hour") or {}
     sd = data.get("seven_day") or {}
+    five_hour_reset = _parse_iso(fh.get("resets_at", ""))
+    weekly_reset = _parse_iso(sd.get("resets_at", ""))
     return ClaudeOfficial(
         ok=True,
-        five_hour_pct=float(fh.get("utilization") or 0),
-        weekly_pct=float(sd.get("utilization") or 0),
-        five_hour_reset=_parse_iso(fh.get("resets_at", "")),
-        weekly_reset=_parse_iso(sd.get("resets_at", "")),
+        five_hour_pct=_util(fh.get("utilization"), five_hour_reset),
+        weekly_pct=_util(sd.get("utilization"), weekly_reset),
+        five_hour_reset=five_hour_reset,
+        weekly_reset=weekly_reset,
         plan=str(oauth.get("subscriptionType", "") or ""),
         error="",
     )
+
+
+def _util(value, reset_at: int) -> float:
+    """視窗一旦過了重置時間就視為已重置（歸零），避免被陳舊數字卡住。"""
+    pct = float(value or 0)
+    if reset_at and time.time() >= reset_at:
+        return 0.0
+    return pct

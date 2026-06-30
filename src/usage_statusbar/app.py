@@ -33,6 +33,12 @@ class UsageStatusBarApp(rumps.App):
 
         self.item_updated = rumps.MenuItem("更新時間：—")
 
+        # 顯示開關（顏色/閃爍/能量條只會納入已勾選的工具）
+        self.item_toggle_claude = rumps.MenuItem("顯示 Claude", callback=self.on_toggle_claude)
+        self.item_toggle_codex = rumps.MenuItem("顯示 Codex", callback=self.on_toggle_codex)
+        self.item_toggle_claude.state = bool(self.cfg.get("show_claude", True))
+        self.item_toggle_codex.state = bool(self.cfg.get("show_codex", True))
+
         self.menu = [
             self.item_claude_header,
             self.item_claude_5h,
@@ -46,6 +52,8 @@ class UsageStatusBarApp(rumps.App):
             self.item_codex_plan,
             None,
             self.item_updated,
+            self.item_toggle_claude,
+            self.item_toggle_codex,
             rumps.MenuItem("立即重新整理", callback=self.on_refresh),
             rumps.MenuItem("開啟設定檔位置", callback=self.on_open_config),
             None,
@@ -79,6 +87,26 @@ class UsageStatusBarApp(rumps.App):
         self._phase ^= 1
         self._render_title()
 
+    def on_toggle_claude(self, sender) -> None:
+        sender.state = not sender.state
+        self.cfg["show_claude"] = bool(sender.state)
+        self._save_cfg()
+        self.refresh()
+
+    def on_toggle_codex(self, sender) -> None:
+        sender.state = not sender.state
+        self.cfg["show_codex"] = bool(sender.state)
+        self._save_cfg()
+        self.refresh()
+
+    def _save_cfg(self) -> None:
+        from .config import save_config
+
+        try:
+            save_config(self.cfg)
+        except OSError:
+            pass  # 寫檔失敗不致命，至少本次工作階段仍生效
+
     def on_open_config(self, _sender) -> None:
         import os
         import subprocess
@@ -90,7 +118,9 @@ class UsageStatusBarApp(rumps.App):
                     '{\n'
                     '  "refresh_seconds": 60,\n'
                     '  "claude_5h_token_limit": 0,\n'
-                    '  "claude_weekly_token_limit": 0\n'
+                    '  "claude_weekly_token_limit": 0,\n'
+                    '  "show_claude": true,\n'
+                    '  "show_codex": false\n'
                     '}\n'
                 )
         subprocess.Popen(["open", "-R", CONFIG_PATH])
@@ -187,20 +217,21 @@ class UsageStatusBarApp(rumps.App):
         # Claude：官方 5 小時 % 優先；否則用估算（有額度→%，無額度→token 數）
         o = snap.claude_official
         c = snap.claude
-        if o.ok:
-            parts.append(f"C {fmt.fmt_pct(o.five_hour_pct)}")
-            worst = max(worst, o.five_hour_pct, o.weekly_pct)
-        elif c.ok:
-            pct5 = self._claude_pct(c.tokens_5h, "claude_5h_token_limit")
-            if pct5 is not None:
-                parts.append(f"C {fmt.fmt_pct(pct5)}")
-                worst = max(worst, pct5)
-            else:
-                parts.append(f"C {fmt.fmt_tokens(c.tokens_5h)}")
+        if self.cfg.get("show_claude", True):
+            if o.ok:
+                parts.append(f"C {fmt.fmt_pct(o.five_hour_pct)}")
+                worst = max(worst, o.five_hour_pct, o.weekly_pct)
+            elif c.ok:
+                pct5 = self._claude_pct(c.tokens_5h, "claude_5h_token_limit")
+                if pct5 is not None:
+                    parts.append(f"C {fmt.fmt_pct(pct5)}")
+                    worst = max(worst, pct5)
+                else:
+                    parts.append(f"C {fmt.fmt_tokens(c.tokens_5h)}")
 
         # Codex：顯示 5 小時 %（並把每週也納入「最緊張」判斷）
         x = snap.codex
-        if x.ok and x.primary:
+        if self.cfg.get("show_codex", True) and x.ok and x.primary:
             parts.append(f"X {fmt.fmt_pct(x.primary.used_percent)}")
             worst = max(worst, x.primary.used_percent)
             if x.secondary:

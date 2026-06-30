@@ -27,6 +27,11 @@ _DEFAULTS = {
     # 是否讀取 Claude 官方用量（重用 Keychain token，與 /usage 一致）。
     # 設為 false 則只用本機估算、且不會觸發 Keychain 授權彈窗。
     "use_official_claude": True,
+    # 量表（顏色/閃爍/能量條）與標題要納入哪些工具。
+    # 預設只看 Claude；Codex 預設關閉（避免陳舊或已用滿的額度把燈號鎖成紅的）。
+    # 想監看 Codex 時，把 show_codex 設為 true，或在選單列勾選。
+    "show_claude": True,
+    "show_codex": False,
 }
 
 
@@ -44,4 +49,17 @@ def load_config() -> dict:
         cfg["refresh_seconds"] = max(15, int(cfg["refresh_seconds"]))
     except (TypeError, ValueError):
         cfg["refresh_seconds"] = 60
+    cfg["show_claude"] = bool(cfg.get("show_claude", True))
+    cfg["show_codex"] = bool(cfg.get("show_codex", False))
     return cfg
+
+
+def save_config(cfg: dict) -> None:
+    """把目前設定寫回設定檔（只保留已知的鍵）。"""
+    data = {k: cfg[k] for k in _DEFAULTS if k in cfg}
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    tmp = CONFIG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp, CONFIG_PATH)

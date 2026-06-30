@@ -175,10 +175,16 @@ def _extract_rate_limits(path: str) -> tuple[dict, float] | None:
 def _to_window(d: dict | None) -> CodexWindow | None:
     if not isinstance(d, dict):
         return None
+    resets_at = int(d.get("resets_at", 0) or 0)
+    used = float(d.get("used_percent", 0) or 0)
+    # 視窗一旦過了重置時間就視為已重置：即使本機檔案沒有更新（很久沒用 Codex），
+    # 也不會再被陳舊的 100% 卡住。
+    if resets_at and time.time() >= resets_at:
+        used = 0.0
     return CodexWindow(
-        used_percent=float(d.get("used_percent", 0) or 0),
+        used_percent=used,
         window_minutes=int(d.get("window_minutes", 0) or 0),
-        resets_at=int(d.get("resets_at", 0) or 0),
+        resets_at=resets_at,
     )
 
 
