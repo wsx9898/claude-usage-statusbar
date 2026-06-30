@@ -18,6 +18,11 @@ _S: dict[str, dict[str, str]] = {
     "menu_quit": {"zh": "結束（永久關閉）", "en": "Quit (permanent)"},
     # 語言切換項：顯示「切換到的目標語言」
     "menu_lang": {"zh": "切換語言：English", "en": "切換語言 / Language：中文"},
+    # 圖示形狀（點擊循環切換）
+    "menu_shape": {"zh": "圖示形狀", "en": "Icon shape"},
+    "shape_square": {"zh": "方形", "en": "Square"},
+    "shape_circle": {"zh": "圓形", "en": "Circle"},
+    "shape_heart": {"zh": "愛心", "en": "Heart"},
     # 標題列
     "title_loading": {"zh": "AI …", "en": "AI …"},
     "title_no_data": {"zh": "AI 無資料", "en": "AI no data"},

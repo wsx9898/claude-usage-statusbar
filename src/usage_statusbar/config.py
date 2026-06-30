@@ -34,6 +34,8 @@ _DEFAULTS = {
     "show_codex": False,
     # 介面語言："zh"（中文）或 "en"（English）。
     "language": "zh",
+    # 量表前方的指示形狀："square"（方形）/ "circle"（圓形）/ "heart"（愛心）。
+    "shape": "square",
 }
 
 
@@ -54,6 +56,8 @@ def load_config() -> dict:
     cfg["show_claude"] = bool(cfg.get("show_claude", True))
     cfg["show_codex"] = bool(cfg.get("show_codex", False))
     cfg["language"] = "en" if str(cfg.get("language", "zh")).lower() == "en" else "zh"
+    shape = str(cfg.get("shape", "square")).lower()
+    cfg["shape"] = shape if shape in ("square", "circle", "heart") else "square"
     return cfg
 
 

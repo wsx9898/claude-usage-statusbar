@@ -63,6 +63,7 @@ class UsageStatusBarApp(rumps.App):
         self.item_toggle_autostart.state = autostart.is_enabled()
 
         # 其餘靜態項目（保留參考，切換語言時重新命名）
+        self.item_shape = rumps.MenuItem(self._shape_menu_title(), callback=self.on_cycle_shape)
         self.item_lang = rumps.MenuItem(i18n.t("menu_lang"), callback=self.on_toggle_lang)
         self.item_refresh = rumps.MenuItem(i18n.t("menu_refresh"), callback=self.on_refresh)
         self.item_open_config = rumps.MenuItem(
@@ -86,6 +87,7 @@ class UsageStatusBarApp(rumps.App):
             self.item_toggle_claude,
             self.item_toggle_codex,
             self.item_toggle_autostart,
+            self.item_shape,
             self.item_lang,
             self.item_refresh,
             self.item_open_config,
@@ -93,19 +95,15 @@ class UsageStatusBarApp(rumps.App):
             self.item_quit,
         ]
 
-        # 標題狀態快取（供動畫定時器重繪用，不重新讀檔/連網）
+        # 標題狀態快取（供切換形狀/語言時重繪用，不重新讀檔/連網）
         self._worst = 0.0
         self._parts: list[str] = []
         self._has_data = False
-        self._phase = 0
-        self._flashing = False  # 是否正在閃爍（≥90%）
         self._fetching = False  # 是否有背景抓取進行中（避免重疊）
 
         # 資料定時器（慢：讀檔 + 連網，於背景執行緒進行）
         self.timer = rumps.Timer(self.on_tick, self.cfg["refresh_seconds"])
         self.timer.start()
-        # 動畫定時器（快：只在閃爍時啟動，平時停用以省電）
-        self.anim_timer = rumps.Timer(self.on_anim, 0.5)
         # 啟動即先抓一次（背景）
         self.refresh()
 
@@ -117,21 +115,18 @@ class UsageStatusBarApp(rumps.App):
         # 手動刷新：強制重抓官方（繞過失敗冷卻一次）
         self.refresh(force=True)
 
-    def on_anim(self, _timer) -> None:
-        # 只在閃爍狀態才會啟動此定時器；切換相位並重繪紅塊
-        self._phase ^= 1
+    def on_cycle_shape(self, _sender) -> None:
+        order = ["square", "circle", "heart"]
+        cur = self.cfg.get("shape", "square")
+        nxt = order[(order.index(cur) + 1) % len(order)] if cur in order else "square"
+        self.cfg["shape"] = nxt
+        self._save_cfg()
+        self.item_shape.title = self._shape_menu_title()
         self._render_title()
 
-    def _set_flashing(self, on: bool) -> None:
-        """依是否臨界，啟動/停用動畫定時器（平時停用以省電）。"""
-        if on and not self._flashing:
-            self._flashing = True
-            self.anim_timer.start()
-        elif not on and self._flashing:
-            self._flashing = False
-            self.anim_timer.stop()
-            self._phase = 0
-            self._render_title()
+    def _shape_menu_title(self) -> str:
+        shape = self.cfg.get("shape", "square")
+        return i18n.t("menu_shape") + i18n.t("colon") + i18n.t("shape_" + shape)
 
     def on_toggle_claude(self, sender) -> None:
         sender.state = not sender.state
@@ -168,6 +163,7 @@ class UsageStatusBarApp(rumps.App):
         self.item_toggle_claude.title = i18n.t("menu_show_claude")
         self.item_toggle_codex.title = i18n.t("menu_show_codex")
         self.item_toggle_autostart.title = i18n.t("menu_autostart")
+        self.item_shape.title = self._shape_menu_title()
         self.item_lang.title = i18n.t("menu_lang")
         self.item_refresh.title = i18n.t("menu_refresh")
         self.item_open_config.title = i18n.t("menu_open_config")
@@ -227,7 +223,6 @@ class UsageStatusBarApp(rumps.App):
         if err is not None:
             self.title = "AI ⚠️"
             self.item_updated.title = i18n.t("read_error", exc=err)
-            self._set_flashing(False)
             return
 
         self._update_claude(snap.claude, snap.claude_official)
@@ -341,19 +336,18 @@ class UsageStatusBarApp(rumps.App):
             if x.secondary:
                 worst = max(worst, x.secondary.used_percent)
 
-        # 快取狀態，交給 _render_title（含動畫）
+        # 快取狀態，交給 _render_title
         self._worst = worst
         self._parts = parts
         self._has_data = bool(parts)
         self._render_title()
-        # 只有臨界（≥90%）才需要閃爍動畫，其餘狀態停用定時器以省電
-        self._set_flashing(self._has_data and worst >= 90)
 
     def _render_title(self) -> None:
+        shape = self.cfg.get("shape", "square")
         if not self._has_data:
-            self.title = icon.render(0.0, self._phase, False) + " " + i18n.t("title_no_data")
+            self.title = icon.render(0.0, False, shape) + " " + i18n.t("title_no_data")
             return
-        gauge = icon.render(self._worst, self._phase, True)
+        gauge = icon.render(self._worst, True, shape)
         self.title = f"{gauge}  " + " · ".join(self._parts)
 
 

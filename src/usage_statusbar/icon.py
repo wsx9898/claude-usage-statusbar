@@ -1,15 +1,23 @@
 """選單列「燃料量表」圖示。
 
-以一個彩色方塊（依使用率變色）＋ 5 格 ▰▱ 量表（代表剩餘額度，越用越見底）表示狀態。
-快到額度（≥90%）時方塊會閃爍，營造像 Running Cat 般的小動畫。
+以一個彩色形狀（依使用率變色）＋ 5 格 ▰▱ 量表（代表剩餘額度，越用越見底）表示狀態。
+形狀可選方形 / 圓形 / 愛心（皆有完整四色 emoji）；≥90% 為純紅，不閃爍。
 
 `worst` 為「最緊張的那個窗口」的使用百分比（0–100）。
-`phase` 為動畫相位（0/1），由上層的動畫定時器切換。
+`shape` 為形狀代號（square / circle / heart）。
 """
 
 from __future__ import annotations
 
 _CELLS = 5
+
+# 各形狀的四色階：[綠 <50, 黃 50–69, 橘 70–89, 紅 ≥90]
+_TIERS: dict[str, list[str]] = {
+    "square": ["🟩", "🟨", "🟧", "🟥"],
+    "circle": ["🟢", "🟡", "🟠", "🔴"],
+    "heart": ["💚", "💛", "🧡", "❤️"],
+}
+_EMPTY = "◽"  # 無資料時的佔位
 
 
 def fuel_bar(worst: float) -> str:
@@ -24,21 +32,22 @@ def fuel_bar(worst: float) -> str:
     return "▰" * filled + "▱" * (_CELLS - filled)
 
 
-def indicator(worst: float, phase: int, has_data: bool) -> str:
-    """依使用率回傳彩色方塊；臨界時隨 phase 閃爍。"""
+def indicator(worst: float, has_data: bool, shape: str = "square") -> str:
+    """依使用率回傳彩色形狀；≥90% 為純紅（不閃爍）。"""
     if not has_data:
-        return "◽"
+        return _EMPTY
+    tier = _TIERS.get(shape, _TIERS["square"])
     if worst >= 90:
-        return "🟥" if phase == 0 else "⬜"  # 閃爍
+        return tier[3]
     if worst >= 70:
-        return "🟧"
+        return tier[2]
     if worst >= 50:
-        return "🟨"
-    return "🟩"
+        return tier[1]
+    return tier[0]
 
 
-def render(worst: float, phase: int, has_data: bool) -> str:
-    """組出「方塊＋量表」前綴，例如：🟩▰▰▰▰▱"""
+def render(worst: float, has_data: bool, shape: str = "square") -> str:
+    """組出「形狀＋量表」前綴，例如：🟩▰▰▰▰▱"""
     if not has_data:
-        return indicator(worst, phase, has_data)
-    return indicator(worst, phase, has_data) + fuel_bar(worst)
+        return indicator(worst, has_data, shape)
+    return indicator(worst, has_data, shape) + fuel_bar(worst)
