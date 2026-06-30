@@ -9,6 +9,7 @@ from __future__ import annotations
 import rumps
 
 from . import format as fmt
+from . import icon
 from . import readers
 from .config import CONFIG_PATH, load_config
 
@@ -51,9 +52,18 @@ class UsageStatusBarApp(rumps.App):
             rumps.MenuItem("結束", callback=rumps.quit_application),
         ]
 
-        # 定時器
+        # 標題狀態快取（供動畫定時器重繪用，不重新讀檔/連網）
+        self._worst = 0.0
+        self._parts: list[str] = []
+        self._has_data = False
+        self._phase = 0
+
+        # 資料定時器（慢：讀檔 + 連網）
         self.timer = rumps.Timer(self.on_tick, self.cfg["refresh_seconds"])
         self.timer.start()
+        # 動畫定時器（快：只重繪標題，讓臨界紅塊閃爍）
+        self.anim_timer = rumps.Timer(self.on_anim, 0.5)
+        self.anim_timer.start()
         # 啟動即先抓一次
         self.refresh()
 
@@ -63,6 +73,11 @@ class UsageStatusBarApp(rumps.App):
 
     def on_refresh(self, _sender) -> None:
         self.refresh()
+
+    def on_anim(self, _timer) -> None:
+        # 只在臨界（紅塊）時需要閃爍；其餘狀態重繪結果相同、成本極低
+        self._phase ^= 1
+        self._render_title()
 
     def on_open_config(self, _sender) -> None:
         import os
@@ -183,7 +198,7 @@ class UsageStatusBarApp(rumps.App):
             else:
                 parts.append(f"C {fmt.fmt_tokens(c.tokens_5h)}")
 
-        # Codex：顯示 5 小時 %
+        # Codex：顯示 5 小時 %（並把每週也納入「最緊張」判斷）
         x = snap.codex
         if x.ok and x.primary:
             parts.append(f"X {fmt.fmt_pct(x.primary.used_percent)}")
@@ -191,11 +206,18 @@ class UsageStatusBarApp(rumps.App):
             if x.secondary:
                 worst = max(worst, x.secondary.used_percent)
 
-        dot = fmt.dot_for_percent(worst)
-        if parts:
-            self.title = f"{dot} " + " · ".join(parts)
-        else:
-            self.title = "AI 無資料"
+        # 快取狀態，交給 _render_title（含動畫）
+        self._worst = worst
+        self._parts = parts
+        self._has_data = bool(parts)
+        self._render_title()
+
+    def _render_title(self) -> None:
+        if not self._has_data:
+            self.title = icon.render(0.0, self._phase, False) + " AI 無資料"
+            return
+        gauge = icon.render(self._worst, self._phase, True)
+        self.title = f"{gauge}  " + " · ".join(self._parts)
 
 
 def main() -> None:
