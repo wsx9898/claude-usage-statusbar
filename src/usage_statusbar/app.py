@@ -314,12 +314,13 @@ class UsageStatusBarApp(rumps.App):
         worst = 0.0
 
         # Claude：官方 5 小時 % 優先；否則用估算（有額度→%，無額度→token 數）
+        # 燈號（顏色/格數）只跟 5 小時窗，與標題顯示的數字一致；每週窗只在選單明細呈現。
         o = snap.claude_official
         c = snap.claude
         if self.cfg.get("show_claude", True):
             if o.ok:
                 parts.append(f"C {fmt.fmt_pct(o.five_hour_pct)}")
-                worst = max(worst, o.five_hour_pct, o.weekly_pct)
+                worst = max(worst, o.five_hour_pct)
             elif c.ok:
                 pct5 = self._claude_pct(c.tokens_5h, "claude_5h_token_limit")
                 if pct5 is not None:
@@ -328,13 +329,11 @@ class UsageStatusBarApp(rumps.App):
                 else:
                     parts.append(f"C {fmt.fmt_tokens(c.tokens_5h)}")
 
-        # Codex：顯示 5 小時 %（並把每週也納入「最緊張」判斷）
+        # Codex：燈號只跟 5 小時（primary）窗；每週窗只在選單明細呈現。
         x = snap.codex
         if self.cfg.get("show_codex", True) and x.ok and x.primary:
             parts.append(f"X {fmt.fmt_pct(x.primary.used_percent)}")
             worst = max(worst, x.primary.used_percent)
-            if x.secondary:
-                worst = max(worst, x.secondary.used_percent)
 
         # 快取狀態，交給 _render_title
         self._worst = worst
