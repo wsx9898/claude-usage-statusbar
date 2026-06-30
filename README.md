@@ -83,6 +83,31 @@ bash run.sh
 
 第一次執行會自動建立 `.venv` 並安裝相依套件，之後直接啟動。
 
+## 啟動、關閉、重新開啟
+
+| 情況 | 會怎樣 / 該怎麼做 |
+|------|------------------|
+| **重開機 / 重新登入** | 自動出現在右上角，**不用手動開**（`RunAtLoad`）。 |
+| **按選單「結束」** | 幾秒後會自己回來——因為設了 `KeepAlive`（「關掉自己重開」）。所以「結束」≒ 重啟一次。 |
+| **想完全關掉（不再自動開）** | `bash uninstall.sh`（移除自動啟動，保留副本）。 |
+| **關掉後想再開回來** | `bash install.sh`，或直接重新登入。 |
+| **只想臨時跑一次、不裝自動啟動** | `bash run.sh`。 |
+
+## 分享給朋友（macOS）
+
+這個工具是**通用的**——它讀的是「執行者自己」的本機檔與「執行者自己」的 Keychain，
+所以朋友拿去用，看到的是他自己的用量，不會碰到你的任何資料或 token。
+
+給朋友的步驟：
+
+1. 把整個專案資料夾給他（用 Git 或壓縮檔皆可；**壓縮前先排除 `.venv/`** 以免肥大且綁路徑）。
+2. 他需要：macOS + `python3`（沒有的話 `brew install python`）。
+3. 在資料夾內執行 `bash install.sh`。
+4. 首次會下載 `rumps`（約 6MB，需網路）；首次可能跳一次 Keychain 授權，按「一律允許」。
+
+> 程式碼本身**不含任何密鑰**——token 是執行時去各自的 Keychain 即時讀取，所以分享資料夾是安全的。
+> 朋友要看 Claude 官方數字，前提是他電腦上有登入過的 Claude Code；要看 Codex 則需有 Codex 的本機紀錄。
+
 ## 設定（可選）
 
 設定檔位置：`~/.config/claude-usage-statusbar/config.json`
@@ -127,3 +152,18 @@ claude-usage-statusbar/
 - 看不到圖示：確認登入的是有畫面的桌面工作階段；查看記錄檔
   `~/Library/Logs/com.user.claude-usage-statusbar.log`。
 - 顯示「無資料」：表示對應的快取檔尚未產生或近期沒有用量。
+- Claude 顯示「官方數字不可用」：多半是 token 暫時過期（再開一下 Claude Code 就會刷新），
+  或 Keychain 授權被取消；會自動退回估算，不影響運作。
+
+## Windows 支援（目前僅 macOS）
+
+目前只支援 macOS。核心的「讀檔解析 + 估價」邏輯（`readers.py`、`pricing.py`、`config.py`、`format.py`）
+是跨平台的，要移植到 Windows 主要改三塊與系統綁定的部分：
+
+1. **選單列 / 系統匣 UI**：`rumps` 只支援 macOS → 改用 `pystray`（搭配 `Pillow`）之類的系統匣套件。
+2. **讀官方用量的憑證**：macOS 用 `security` 讀 Keychain → Windows 需改讀 Windows 認證管理員
+   或 Claude Code 在 Windows 的憑證存放位置。
+3. **開機自動啟動**：macOS 用 LaunchAgent（plist）→ Windows 改用「工作排程器」或啟動資料夾捷徑。
+
+檔案路徑用的是 `~`（`os.path.expanduser`），在 Windows 也能解析，多半不用大改。
+需要 Windows 版時再跟我說。
