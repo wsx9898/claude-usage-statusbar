@@ -250,16 +250,30 @@ def _project_official(
     if not c.ok:
         return o  # 沒有本機資料可推估，維持快取值
 
-    p5 = _project_one(o.five_hour_pct, c.tokens_5h, _calib["pct5"], _calib["tok5"])
-    p7 = _project_one(o.weekly_pct, c.tokens_7d, _calib["pct7"], _calib["tok7"])
+    p5 = _project_one(
+        o.five_hour_pct, o.five_hour_reset, c.tokens_5h, _calib["pct5"], _calib["tok5"]
+    )
+    p7 = _project_one(
+        o.weekly_pct, o.weekly_reset, c.tokens_7d, _calib["pct7"], _calib["tok7"]
+    )
     changed = p5 != o.five_hour_pct or p7 != o.weekly_pct
     return replace(o, five_hour_pct=p5, weekly_pct=p7, projected=changed)
 
 
 def _project_one(
-    cached_pct: float, tokens_now: int, calib_pct: float | None, calib_tok: float | None
+    cached_pct: float,
+    reset_at: int,
+    tokens_now: int,
+    calib_pct: float | None,
+    calib_tok: float | None,
 ) -> float:
-    """推估單一視窗：快取% + 自校準點以來新增 token × (校準%/校準token)。"""
+    """推估單一視窗：快取% + 自校準點以來新增 token × (校準%/校準token)。
+
+    視窗一旦過了重置時間，強制歸零、不疊加任何推估——「到點就歸零」優先於推估，
+    因為重置後舊校準點已無意義，需等下次成功取得官方值才重新校準。
+    """
+    if reset_at and time.time() >= reset_at:
+        return 0.0
     if not calib_pct or not calib_tok or calib_tok <= 0:
         return cached_pct
     ratio = calib_pct / calib_tok  # 每 token 對應的 %
