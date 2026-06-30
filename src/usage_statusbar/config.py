@@ -58,8 +58,18 @@ def load_config() -> dict:
 
 
 def save_config(cfg: dict) -> None:
-    """把目前設定寫回設定檔（只保留已知的鍵）。"""
-    data = {k: cfg[k] for k in _DEFAULTS if k in cfg}
+    """把目前設定寫回設定檔。保留檔案中既有的未知鍵，只覆蓋已知鍵。"""
+    data: dict = {}
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            existing = json.load(f)
+        if isinstance(existing, dict):
+            data = existing
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    for k in _DEFAULTS:
+        if k in cfg:
+            data[k] = cfg[k]
     os.makedirs(CONFIG_DIR, exist_ok=True)
     tmp = CONFIG_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
