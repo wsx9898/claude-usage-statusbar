@@ -30,6 +30,7 @@
 
 - **顯示 Claude** / **顯示 Codex**：控制顏色、閃爍、能量條與標題要納入哪些工具。
   只訂閱 Claude 時，建議維持 Codex 關閉，避免 Codex 陳舊或已用滿的額度把燈號鎖成紅的。
+- **切換語言 / Language**：中 ↔ 英即時切換（也會存進設定檔 `language`）。
 
 點開選單可看到詳細資訊：
 
@@ -143,6 +144,7 @@ bash run.sh
 ```json
 {
   "refresh_seconds": 60,
+  "language": "zh",
   "use_official_claude": true,
   "show_claude": true,
   "show_codex": false,
@@ -152,6 +154,7 @@ bash run.sh
 ```
 
 - `refresh_seconds`：重新整理間隔秒數（最小 15）。
+- `language`：介面語言，`"zh"`（中文，預設）或 `"en"`（English）。可在選單列「切換語言 / Language」即時切換。
 - `use_official_claude`：是否讀取 Claude 官方用量（預設 `true`）。設 `false` 則只用本機估算、
   也不會觸發 Keychain 授權。
 - `show_claude` / `show_codex`：量表（顏色/閃爍/能量條）與標題要納入哪些工具。
@@ -171,6 +174,7 @@ claude-usage-statusbar/
 │   ├── claude_remote.py # 重用 Keychain token 取 Claude 官方用量
 │   ├── icon.py         # 燃料量表圖示（彩色方塊 + ▰▱ 能量條 + 閃爍）
 │   ├── autostart.py    # 管理 LaunchAgent（開機自動啟動開關）
+│   ├── i18n.py         # 中英文字串表（介面語言切換）
 │   ├── pricing.py      # 模型估價表
 │   ├── format.py     # 顯示格式化
 │   └── config.py     # 設定檔讀取 / 寫入

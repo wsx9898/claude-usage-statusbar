@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import time
 
+from . import i18n
+
 
 def fmt_tokens(n: int) -> str:
     n = int(n or 0)
@@ -28,15 +30,15 @@ def fmt_reset(resets_at: int) -> str:
         return ""
     remain = int(resets_at - time.time())
     if remain <= 0:
-        return "即將重置"
+        return i18n.t("reset_soon")
     hours, rem = divmod(remain, 3600)
     minutes = rem // 60
     if hours >= 24:
         days, h = divmod(hours, 24)
-        return f"{days} 天 {h} 小時後重置"
+        return i18n.t("reset_days", d=days, h=h)
     if hours >= 1:
-        return f"{hours} 小時 {minutes} 分後重置"
-    return f"{minutes} 分後重置"
+        return i18n.t("reset_hours", h=hours, m=minutes)
+    return i18n.t("reset_mins", m=minutes)
 
 
 def dot_for_percent(p: float) -> str:

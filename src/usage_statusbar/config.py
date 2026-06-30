@@ -32,6 +32,8 @@ _DEFAULTS = {
     # 想監看 Codex 時，把 show_codex 設為 true，或在選單列勾選。
     "show_claude": True,
     "show_codex": False,
+    # 介面語言："zh"（中文）或 "en"（English）。
+    "language": "zh",
 }
 
 
@@ -51,6 +53,7 @@ def load_config() -> dict:
         cfg["refresh_seconds"] = 60
     cfg["show_claude"] = bool(cfg.get("show_claude", True))
     cfg["show_codex"] = bool(cfg.get("show_codex", False))
+    cfg["language"] = "en" if str(cfg.get("language", "zh")).lower() == "en" else "zh"
     return cfg
 
 
