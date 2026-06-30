@@ -56,6 +56,39 @@ def _usage_tokens(usage: dict) -> int:
     )
 
 
+# 逐檔解析結果快取：path -> (mtime, [(ts, tokens, cost), ...])
+# 只在檔案 mtime 變動時重讀，避免每次刷新都重掃所有 7 天內的 jsonl（重度使用者的磁碟負擔）。
+_claude_file_cache: dict[str, tuple[float, list[tuple[float, int, float]]]] = {}
+
+
+def _parse_claude_file(path: str) -> list[tuple[float, int, float]]:
+    """解析單一 jsonl，回傳 [(時間, tokens, 成本), ...]。"""
+    recs: list[tuple[float, int, float]] = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or '"usage"' not in line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                msg = rec.get("message")
+                if not isinstance(msg, dict):
+                    continue
+                usage = msg.get("usage")
+                if not isinstance(usage, dict):
+                    continue
+                ts = _parse_ts(rec.get("timestamp", ""))
+                if ts is None:
+                    continue
+                recs.append((ts, _usage_tokens(usage), pricing.estimate_cost(msg.get("model"), usage)))
+    except OSError:
+        return []
+    return recs
+
+
 def read_claude_usage() -> ClaudeUsage:
     now = time.time()
     cutoff_7d = now - SEVEN_DAYS
@@ -72,45 +105,37 @@ def read_claude_usage() -> ClaudeUsage:
         return result
 
     found_any = False
+    seen: set[str] = set()
     for path in files:
         try:
             # 只看 7 天內有更新過的檔案，省去掃描歷史檔
-            if os.path.getmtime(path) < cutoff_7d:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        if mtime < cutoff_7d:
+            continue
+        seen.add(path)
+
+        cached = _claude_file_cache.get(path)
+        if cached is not None and cached[0] == mtime:
+            recs = cached[1]
+        else:
+            recs = _parse_claude_file(path)
+            _claude_file_cache[path] = (mtime, recs)
+
+        for ts, tokens, cost in recs:
+            if ts < cutoff_7d:
                 continue
-        except OSError:
-            continue
+            found_any = True
+            result.tokens_7d += tokens
+            result.cost_7d += cost
+            if ts >= cutoff_5h:
+                result.tokens_5h += tokens
+                result.cost_5h += cost
 
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or '"usage"' not in line:
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    msg = rec.get("message")
-                    if not isinstance(msg, dict):
-                        continue
-                    usage = msg.get("usage")
-                    if not isinstance(usage, dict):
-                        continue
-                    ts = _parse_ts(rec.get("timestamp", ""))
-                    if ts is None or ts < cutoff_7d:
-                        continue
-
-                    found_any = True
-                    tokens = _usage_tokens(usage)
-                    cost = pricing.estimate_cost(msg.get("model"), usage)
-
-                    result.tokens_7d += tokens
-                    result.cost_7d += cost
-                    if ts >= cutoff_5h:
-                        result.tokens_5h += tokens
-                        result.cost_5h += cost
-        except OSError:
-            continue
+    # 清掉已不在掃描範圍（超過 7 天或已刪除）的快取，避免無限成長
+    for stale_path in [p for p in _claude_file_cache if p not in seen]:
+        del _claude_file_cache[stale_path]
 
     result.ok = found_any
     if not found_any:
@@ -281,9 +306,11 @@ def _project_one(
     return min(100.0, cached_pct + delta * ratio)
 
 
-def read_all(use_official: bool = True) -> Snapshot:
+def read_all(use_official: bool = True, force: bool = False) -> Snapshot:
     official = (
-        claude_remote.fetch_official() if use_official else claude_remote.ClaudeOfficial()
+        claude_remote.fetch_official(force=force)
+        if use_official
+        else claude_remote.ClaudeOfficial()
     )
     claude = read_claude_usage()
     official = _project_official(official, claude)
