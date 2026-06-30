@@ -180,7 +180,12 @@ class UsageStatusBarApp(rumps.App):
 
         # 官方數字（與 /usage 一致）優先
         if o.ok:
-            tag = "（官方·快取）" if o.stale else "（官方）"
+            if o.projected:
+                tag = "（官方·推估中）"
+            elif o.stale:
+                tag = "（官方·快取）"
+            else:
+                tag = "（官方）"
             self.item_claude_5h.title = (
                 f"  5 小時：{fmt.fmt_pct(o.five_hour_pct)}"
                 f"  ·  {fmt.fmt_reset(o.five_hour_reset)}{tag}"

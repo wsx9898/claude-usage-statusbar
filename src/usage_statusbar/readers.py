@@ -224,12 +224,57 @@ class Snapshot:
     fetched_at: float = field(default_factory=time.time)
 
 
+# 官方→本機 token 的校準狀態（程序記憶體內）。
+# 每次官方成功時記下「官方% 對應的本機 token 量」，據此把後續本機新增用量換算成 %。
+_calib: dict[str, float | None] = {"pct5": None, "tok5": None, "pct7": None, "tok7": None}
+
+
+def _project_official(
+    o: claude_remote.ClaudeOfficial, c: ClaudeUsage
+) -> claude_remote.ClaudeOfficial:
+    """官方失敗時，用最新快取＋本機新增用量推估百分比；官方成功時則重新校準。"""
+    from dataclasses import replace
+
+    if not o.ok:
+        return o  # 冷啟動且無快取：交由上層退回估算
+
+    if not o.stale:
+        # 拿到真正的官方值：記下校準點（需百分比與 token 皆 > 0 才可靠）
+        if c.ok and c.tokens_5h > 0 and o.five_hour_pct > 0:
+            _calib["pct5"], _calib["tok5"] = o.five_hour_pct, c.tokens_5h
+        if c.ok and c.tokens_7d > 0 and o.weekly_pct > 0:
+            _calib["pct7"], _calib["tok7"] = o.weekly_pct, c.tokens_7d
+        return o
+
+    # 快取（stale）：疊加本機新增用量
+    if not c.ok:
+        return o  # 沒有本機資料可推估，維持快取值
+
+    p5 = _project_one(o.five_hour_pct, c.tokens_5h, _calib["pct5"], _calib["tok5"])
+    p7 = _project_one(o.weekly_pct, c.tokens_7d, _calib["pct7"], _calib["tok7"])
+    changed = p5 != o.five_hour_pct or p7 != o.weekly_pct
+    return replace(o, five_hour_pct=p5, weekly_pct=p7, projected=changed)
+
+
+def _project_one(
+    cached_pct: float, tokens_now: int, calib_pct: float | None, calib_tok: float | None
+) -> float:
+    """推估單一視窗：快取% + 自校準點以來新增 token × (校準%/校準token)。"""
+    if not calib_pct or not calib_tok or calib_tok <= 0:
+        return cached_pct
+    ratio = calib_pct / calib_tok  # 每 token 對應的 %
+    delta = max(0.0, float(tokens_now) - float(calib_tok))
+    return min(100.0, cached_pct + delta * ratio)
+
+
 def read_all(use_official: bool = True) -> Snapshot:
     official = (
         claude_remote.fetch_official() if use_official else claude_remote.ClaudeOfficial()
     )
+    claude = read_claude_usage()
+    official = _project_official(official, claude)
     return Snapshot(
-        claude=read_claude_usage(),
+        claude=claude,
         codex=read_codex_usage(),
         claude_official=official,
     )

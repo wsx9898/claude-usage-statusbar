@@ -43,6 +43,7 @@ class ClaudeOfficial:
     plan: str = ""
     error: str = ""
     stale: bool = False  # True 表示這是上次成功的快取值（本次取用官方失敗，例如 429）
+    projected: bool = False  # True 表示在快取值上疊加了本機用量推估（尚未校正）
     updated_at: float = 0.0  # 這份官方數字最後一次成功抓取的時間（epoch 秒）
 
 
