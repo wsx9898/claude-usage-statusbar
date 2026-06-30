@@ -25,6 +25,9 @@ _S: dict[str, dict[str, str]] = {
     # 明細欄位標籤
     "lbl_5h": {"zh": "5 小時", "en": "5h"},
     "lbl_weekly": {"zh": "每週", "en": "Weekly"},
+    "lbl_monthly": {"zh": "每月", "en": "Monthly"},
+    "lbl_window_h": {"zh": "{h} 小時窗", "en": "{h}h window"},
+    "lbl_window_d": {"zh": "{d} 天窗", "en": "{d}d window"},
     "lbl_est": {"zh": "估算", "en": "Estimate"},
     "lbl_plan": {"zh": "方案", "en": "Plan"},
     "lbl_updated": {"zh": "更新時間", "en": "Updated"},
@@ -57,6 +60,22 @@ _S: dict[str, dict[str, str]] = {
 def set_lang(lang: str) -> None:
     global LANG
     LANG = lang if lang in ("zh", "en") else "zh"
+
+
+def codex_window_label(window_minutes: int) -> str:
+    """依視窗長度給出合適標籤（Codex 各方案的窗長不同）。"""
+    m = int(window_minutes or 0)
+    if m <= 0:
+        return t("lbl_5h")
+    if m <= 360:  # ≤6 小時
+        return t("lbl_5h")
+    if 9000 <= m <= 11000:  # ~7 天
+        return t("lbl_weekly")
+    if 40000 <= m <= 46000:  # ~30 天
+        return t("lbl_monthly")
+    if m < 1440:
+        return t("lbl_window_h", h=round(m / 60))
+    return t("lbl_window_d", d=round(m / 1440))
 
 
 def t(key: str, **kwargs) -> str:
