@@ -24,6 +24,9 @@ _DEFAULTS = {
     "refresh_seconds": 60,
     "claude_5h_token_limit": 0,
     "claude_weekly_token_limit": 0,
+    # 是否讀取 Claude 官方用量（重用 Keychain token，與 /usage 一致）。
+    # 設為 false 則只用本機估算、且不會觸發 Keychain 授權彈窗。
+    "use_official_claude": True,
 }
 
 

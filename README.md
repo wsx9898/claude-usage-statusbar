@@ -16,8 +16,9 @@
 點開選單可看到詳細資訊：
 
 - **Claude Code**
-  - 最近 5 小時：token 數 + 估算成本（+ 百分比，需設定額度）
-  - 最近 7 天：token 數 + 估算成本（+ 百分比，需設定額度）
+  - 5 小時 / 每週：**官方使用百分比**（與 `claude /usage` 一致）+ 重置時間
+  - 估算：5 小時 / 7 天的 token 數與估算成本（成本參考用，也是官方數字不可用時的後備）
+  - 方案類型
 - **Codex**
   - 最近 5 小時：使用百分比 + 重置時間
   - 每週：使用百分比 + 重置時間
@@ -25,13 +26,24 @@
 
 ## 資料來源
 
-| 工具 | 來源檔案 | 取得方式 |
-|------|----------|----------|
-| Claude Code | `~/.claude/projects/*/*.jsonl` | 彙整每筆訊息的 `usage`（input/output/cache tokens）與時間戳，算出滾動 5 小時 / 7 天視窗的 token 與估算成本 |
-| Codex | `~/.codex/sessions/**/rollout-*.jsonl` | 讀取最新 `token_count` 事件中的 `rate_limits`（5 小時窗、每週窗的 `used_percent`、`resets_at`、`plan_type`）— 為官方回報的精準百分比 |
+| 工具 | 來源 | 取得方式 |
+|------|------|----------|
+| **Claude Code（官方）** | macOS Keychain 的 `Claude Code-credentials` + Anthropic API | 重用 Claude Code 已登入的 OAuth token，呼叫 `/usage` 同源端點 `GET /api/oauth/usage`，取得 5 小時 / 每週的**官方使用百分比**與重置時間 |
+| Claude Code（估算） | `~/.claude/projects/*/*.jsonl` | 彙整每筆訊息的 `usage`（input/output/cache tokens）與時間戳，算出滾動 5 小時 / 7 天的 token 與估算成本（成本參考 + 官方失敗時後備）|
+| Codex | `~/.codex/sessions/**/rollout-*.jsonl` | 讀取最新 `token_count` 事件的 `rate_limits`（5 小時窗、每週窗的 `used_percent`、`resets_at`、`plan_type`）— 官方回報的精準百分比 |
 
-> **註**：Claude Code 的本機檔沒有官方「額度百分比」欄位，因此這裡是以 token 用量與**估算成本**呈現。
-> 若你想看百分比，可在設定檔填入自己的額度（見下方）。成本為估算值，並非帳單金額。
+### 關於官方數字（與 `/usage` 一致）
+
+- **不需要另外登入**：直接重用 Claude Code 已存在 Keychain 的 OAuth token。
+- **只讀不寫**：不會刷新 token、也不會寫回 Keychain，避免與 Claude Code 衝突。
+  你持續使用 Claude Code 時，它會自動維持 token 新鮮；萬一 token 過期（API 回 401）、
+  讀不到憑證或無網路，會**自動退回本機估算**，最壞情況與不接官方時相同。
+- **首次授權**：背景程式透過系統 `security` 工具讀取憑證，第一次可能跳出
+  「`security` 想存取 Claude Code-credentials」的視窗，按**一律允許**一次即可，之後靜默。
+- **注意**：`/api/oauth/usage` 為 Claude Code 內部端點、非公開文件，Claude 改版時有可能變動；
+  屆時會自動 fallback，不會讓 App 崩潰。成本仍為估算值、非帳單金額。
+
+> 若不想用官方數字（或不想看到 Keychain 授權），在設定檔把 `use_official_claude` 設為 `false`。
 
 ## 安裝（含自動啟動 / 自動重啟）
 
@@ -79,14 +91,17 @@ bash run.sh
 ```json
 {
   "refresh_seconds": 60,
+  "use_official_claude": true,
   "claude_5h_token_limit": 0,
   "claude_weekly_token_limit": 0
 }
 ```
 
 - `refresh_seconds`：重新整理間隔秒數（最小 15）。
-- `claude_5h_token_limit` / `claude_weekly_token_limit`：填入大於 0 的 token 額度後，
-  Claude 區塊與標題會改用**百分比**顯示；預設 0 則只顯示 token 數與估算成本。
+- `use_official_claude`：是否讀取 Claude 官方用量（預設 `true`）。設 `false` 則只用本機估算、
+  也不會觸發 Keychain 授權。
+- `claude_5h_token_limit` / `claude_weekly_token_limit`：僅在**官方數字不可用、退回估算**時生效；
+  填入大於 0 的 token 額度後，估算會換算成百分比，否則顯示 token 數與估算成本。
 
 > 修改設定檔後，從選單「立即重新整理」或重啟 App 生效。
 
@@ -95,9 +110,10 @@ bash run.sh
 ```
 claude-usage-statusbar/
 ├── src/usage_statusbar/
-│   ├── app.py        # rumps 選單列 App（UI / 定時器）
-│   ├── readers.py    # 讀取 Claude / Codex 本機快取
-│   ├── pricing.py    # 模型估價表
+│   ├── app.py          # rumps 選單列 App（UI / 定時器）
+│   ├── readers.py      # 讀取 Claude / Codex 本機快取（估算）
+│   ├── claude_remote.py # 重用 Keychain token 取 Claude 官方用量
+│   ├── pricing.py      # 模型估價表
 │   ├── format.py     # 顯示格式化
 │   └── config.py     # 設定檔讀取
 ├── run.sh            # 啟動器（建立 venv + 啟動）

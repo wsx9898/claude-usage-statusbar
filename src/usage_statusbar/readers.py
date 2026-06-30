@@ -11,7 +11,7 @@ import os
 import time
 from dataclasses import dataclass, field
 
-from . import pricing
+from . import claude_remote, pricing
 
 CLAUDE_PROJECTS = os.path.expanduser("~/.claude/projects")
 CODEX_SESSIONS = os.path.expanduser("~/.codex/sessions")
@@ -211,8 +211,19 @@ def read_codex_usage() -> CodexUsage:
 class Snapshot:
     claude: ClaudeUsage = field(default_factory=ClaudeUsage)
     codex: CodexUsage = field(default_factory=CodexUsage)
+    # Claude 官方用量（與 /usage 一致）；未啟用或失敗時 ok=False，改用 claude 估算
+    claude_official: claude_remote.ClaudeOfficial = field(
+        default_factory=claude_remote.ClaudeOfficial
+    )
     fetched_at: float = field(default_factory=time.time)
 
 
-def read_all() -> Snapshot:
-    return Snapshot(claude=read_claude_usage(), codex=read_codex_usage())
+def read_all(use_official: bool = True) -> Snapshot:
+    official = (
+        claude_remote.fetch_official() if use_official else claude_remote.ClaudeOfficial()
+    )
+    return Snapshot(
+        claude=read_claude_usage(),
+        codex=read_codex_usage(),
+        claude_official=official,
+    )

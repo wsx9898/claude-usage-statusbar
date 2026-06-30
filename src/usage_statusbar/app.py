@@ -21,7 +21,9 @@ class UsageStatusBarApp(rumps.App):
         # 選單項目（先建立，之後更新文字）
         self.item_claude_header = rumps.MenuItem("Claude Code")
         self.item_claude_5h = rumps.MenuItem("  5 小時：—")
-        self.item_claude_7d = rumps.MenuItem("  7 天：—")
+        self.item_claude_7d = rumps.MenuItem("  每週：—")
+        self.item_claude_est = rumps.MenuItem("  估算：—")
+        self.item_claude_plan = rumps.MenuItem("  方案：—")
 
         self.item_codex_header = rumps.MenuItem("Codex")
         self.item_codex_5h = rumps.MenuItem("  5 小時：—")
@@ -34,6 +36,8 @@ class UsageStatusBarApp(rumps.App):
             self.item_claude_header,
             self.item_claude_5h,
             self.item_claude_7d,
+            self.item_claude_est,
+            self.item_claude_plan,
             None,
             self.item_codex_header,
             self.item_codex_5h,
@@ -79,13 +83,13 @@ class UsageStatusBarApp(rumps.App):
     # -- 核心 --------------------------------------------------------------
     def refresh(self) -> None:
         try:
-            snap = readers.read_all()
+            snap = readers.read_all(use_official=bool(self.cfg.get("use_official_claude", True)))
         except Exception as exc:  # 保底：任何讀取錯誤都不該讓 App 崩潰
             self.title = "AI ⚠️"
             self.item_updated.title = f"讀取錯誤：{exc}"
             return
 
-        self._update_claude(snap.claude)
+        self._update_claude(snap.claude, snap.claude_official)
         self._update_codex(snap.codex)
         self._update_title(snap)
 
@@ -99,24 +103,42 @@ class UsageStatusBarApp(rumps.App):
             return min(100.0, tokens / limit * 100.0)
         return None
 
-    def _update_claude(self, c: readers.ClaudeUsage) -> None:
-        if not c.ok:
-            self.item_claude_5h.title = "  5 小時：" + (c.error or "無資料")
-            self.item_claude_7d.title = "  7 天：—"
+    def _update_claude(self, c: readers.ClaudeUsage, o) -> None:
+        # 估算行（永遠顯示，作為成本參考與官方失敗時的後備）
+        if c.ok:
+            self.item_claude_est.title = (
+                f"  估算：5h {fmt.fmt_tokens(c.tokens_5h)}/{fmt.fmt_cost(c.cost_5h)}"
+                f" · 7d {fmt.fmt_tokens(c.tokens_7d)}/{fmt.fmt_cost(c.cost_7d)}"
+            )
+        else:
+            self.item_claude_est.title = "  估算：" + (c.error or "無資料")
+
+        # 官方數字（與 /usage 一致）優先
+        if o.ok:
+            self.item_claude_5h.title = (
+                f"  5 小時：{fmt.fmt_pct(o.five_hour_pct)}"
+                f"  ·  {fmt.fmt_reset(o.five_hour_reset)}（官方）"
+            )
+            self.item_claude_7d.title = (
+                f"  每週：{fmt.fmt_pct(o.weekly_pct)}"
+                f"  ·  {fmt.fmt_reset(o.weekly_reset)}（官方）"
+            )
+            self.item_claude_plan.title = "  方案：" + (o.plan or "—")
             return
 
+        # 官方失敗 → 退回估算（如有設定額度則換算百分比）
+        reason = o.error or "未啟用"
         pct5 = self._claude_pct(c.tokens_5h, "claude_5h_token_limit")
         pct7 = self._claude_pct(c.tokens_7d, "claude_weekly_token_limit")
-
-        s5 = f"  5 小時：{fmt.fmt_tokens(c.tokens_5h)} tokens · {fmt.fmt_cost(c.cost_5h)}"
-        if pct5 is not None:
-            s5 += f" · {fmt.fmt_pct(pct5)}"
+        s5 = f"  5 小時：{fmt.fmt_tokens(c.tokens_5h)} tokens（估算）" if c.ok else "  5 小時：—"
+        if pct5 is not None and c.ok:
+            s5 = f"  5 小時：{fmt.fmt_pct(pct5)}（估算）"
+        s7 = f"  每週：{fmt.fmt_tokens(c.tokens_7d)} tokens（估算）" if c.ok else "  每週：—"
+        if pct7 is not None and c.ok:
+            s7 = f"  每週：{fmt.fmt_pct(pct7)}（估算）"
         self.item_claude_5h.title = s5
-
-        s7 = f"  7 天：{fmt.fmt_tokens(c.tokens_7d)} tokens · {fmt.fmt_cost(c.cost_7d)}"
-        if pct7 is not None:
-            s7 += f" · {fmt.fmt_pct(pct7)}"
         self.item_claude_7d.title = s7
+        self.item_claude_plan.title = f"  方案：官方數字不可用（{reason}）"
 
     def _update_codex(self, x: readers.CodexUsage) -> None:
         if not x.ok:
@@ -147,9 +169,13 @@ class UsageStatusBarApp(rumps.App):
         parts: list[str] = []
         worst = 0.0
 
-        # Claude：有設定額度就顯示 %，否則顯示 5 小時 token 數
+        # Claude：官方 5 小時 % 優先；否則用估算（有額度→%，無額度→token 數）
+        o = snap.claude_official
         c = snap.claude
-        if c.ok:
+        if o.ok:
+            parts.append(f"C {fmt.fmt_pct(o.five_hour_pct)}")
+            worst = max(worst, o.five_hour_pct, o.weekly_pct)
+        elif c.ok:
             pct5 = self._claude_pct(c.tokens_5h, "claude_5h_token_limit")
             if pct5 is not None:
                 parts.append(f"C {fmt.fmt_pct(pct5)}")
