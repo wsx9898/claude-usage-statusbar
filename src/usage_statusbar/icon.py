@@ -23,16 +23,18 @@ _EMPTY = "◽"  # 無資料時的佔位
 
 
 def fuel_bar(worst: float) -> str:
-    """以 ▰（剩餘）/▱（已用）畫出 5 格量表。越用越見底。"""
+    """以 ▰（剩餘）/◧（半格）/▱（已用）畫出 5 格量表。越用越見底。
+
+    每格代表一個 20% 區段，再細分半格（10%）：該半段沒用完就不掉，未滿額至少留半格。
+    """
     worst = max(0.0, float(worst))
     if worst >= 100:
-        filled = 0
-    else:
-        remaining = 100.0 - worst
-        # 每格代表一個 20% 區段，該段沒用完就不掉格（無條件進位）；未滿額至少留 1 格。
-        filled = max(1, math.ceil(remaining / 20.0))
-    filled = min(_CELLS, filled)
-    return "▰" * filled + "▱" * (_CELLS - filled)
+        return "▱" * _CELLS
+    remaining = 100.0 - worst
+    halves = min(_CELLS * 2, max(1, math.ceil(remaining / 10.0)))  # 0–10 個半格
+    full = halves // 2
+    half = halves % 2
+    return "▰" * full + ("◧" if half else "") + "▱" * (_CELLS - full - half)
 
 
 def indicator(worst: float, has_data: bool, shape: str = "square") -> str:
