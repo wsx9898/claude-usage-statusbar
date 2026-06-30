@@ -1,5 +1,7 @@
 #!/bin/bash
-# 安裝 LaunchAgent：登入時自動啟動，且結束/閃退後自動重啟（KeepAlive）。
+# 安裝 LaunchAgent：登入時自動啟動（RunAtLoad）。
+# KeepAlive=false：從選單列「結束」即永久關閉，launchd 不會把它拉回來；
+# 是否登入自動啟動可在選單列「開機時自動啟動」切換。
 #
 # 重要：macOS 會對 ~/Documents、~/Desktop、~/Downloads 等位置做 TCC 權限保護，
 # 由 launchd 啟動的程序無法在這些位置「執行」程式碼（會出現 Operation not permitted）。
@@ -56,7 +58,7 @@ cat > "$PLIST" <<PLIST_EOF
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
+    <false/>
     <key>ProcessType</key>
     <string>Interactive</string>
     <key>StandardOutPath</key>

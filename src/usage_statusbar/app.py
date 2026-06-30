@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import rumps
 
+from . import autostart
 from . import format as fmt
 from . import icon
 from . import readers
@@ -37,7 +38,14 @@ class UsageStatusBarApp(rumps.App):
         self.item_toggle_claude = rumps.MenuItem("顯示 Claude", callback=self.on_toggle_claude)
         self.item_toggle_codex = rumps.MenuItem("顯示 Codex", callback=self.on_toggle_codex)
         self.item_toggle_claude.state = bool(self.cfg.get("show_claude", True))
-        self.item_toggle_codex.state = bool(self.cfg.get("show_codex", True))
+        self.item_toggle_codex.state = bool(self.cfg.get("show_codex", False))
+
+        # 開機自動啟動開關（以 LaunchAgent plist 是否存在為準）
+        autostart.sync_plist_file()
+        self.item_toggle_autostart = rumps.MenuItem(
+            "開機時自動啟動", callback=self.on_toggle_autostart
+        )
+        self.item_toggle_autostart.state = autostart.is_enabled()
 
         self.menu = [
             self.item_claude_header,
@@ -54,10 +62,11 @@ class UsageStatusBarApp(rumps.App):
             self.item_updated,
             self.item_toggle_claude,
             self.item_toggle_codex,
+            self.item_toggle_autostart,
             rumps.MenuItem("立即重新整理", callback=self.on_refresh),
             rumps.MenuItem("開啟設定檔位置", callback=self.on_open_config),
             None,
-            rumps.MenuItem("結束", callback=rumps.quit_application),
+            rumps.MenuItem("結束（永久關閉）", callback=self.on_quit),
         ]
 
         # 標題狀態快取（供動畫定時器重繪用，不重新讀檔/連網）
@@ -98,6 +107,17 @@ class UsageStatusBarApp(rumps.App):
         self.cfg["show_codex"] = bool(sender.state)
         self._save_cfg()
         self.refresh()
+
+    def on_toggle_autostart(self, sender) -> None:
+        if sender.state:  # 目前開 → 關閉
+            autostart.disable()
+        else:  # 目前關 → 開啟
+            autostart.enable()
+        sender.state = autostart.is_enabled()
+
+    def on_quit(self, _sender) -> None:
+        # KeepAlive=false，按下即永久關閉，launchd 不會再拉回來。
+        rumps.quit_application()
 
     def _save_cfg(self) -> None:
         from .config import save_config
