@@ -180,13 +180,14 @@ class UsageStatusBarApp(rumps.App):
 
         # 官方數字（與 /usage 一致）優先
         if o.ok:
+            tag = "（官方·快取）" if o.stale else "（官方）"
             self.item_claude_5h.title = (
                 f"  5 小時：{fmt.fmt_pct(o.five_hour_pct)}"
-                f"  ·  {fmt.fmt_reset(o.five_hour_reset)}（官方）"
+                f"  ·  {fmt.fmt_reset(o.five_hour_reset)}{tag}"
             )
             self.item_claude_7d.title = (
                 f"  每週：{fmt.fmt_pct(o.weekly_pct)}"
-                f"  ·  {fmt.fmt_reset(o.weekly_reset)}（官方）"
+                f"  ·  {fmt.fmt_reset(o.weekly_reset)}{tag}"
             )
             self.item_claude_plan.title = "  方案：" + (o.plan or "—")
             return

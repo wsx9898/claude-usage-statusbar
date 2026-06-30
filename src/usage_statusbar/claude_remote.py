@@ -42,6 +42,15 @@ class ClaudeOfficial:
     weekly_reset: int = 0
     plan: str = ""
     error: str = ""
+    stale: bool = False  # True 表示這是上次成功的快取值（本次取用官方失敗，例如 429）
+    updated_at: float = 0.0  # 這份官方數字最後一次成功抓取的時間（epoch 秒）
+
+
+# 上一次成功的官方數字（程序記憶體內）；取用失敗時沿用，避免閃回估算/變色。
+_last_good: ClaudeOfficial | None = None
+# 失敗後的冷卻：在此時間前不再打網路，直接回快取，少踩 429。
+_cooldown_until: float = 0.0
+_FAIL_COOLDOWN = 120.0  # 秒
 
 
 def _read_oauth() -> dict | None:
@@ -76,14 +85,41 @@ def _parse_iso(s: str) -> int:
         return 0
 
 
+def _cached(error: str) -> ClaudeOfficial:
+    """取用官方失敗時的回傳：有上次成功值就沿用（標記 stale），否則回錯誤。
+
+    沿用時仍重新套用 `_util`，使視窗過了重置時間會自動歸零、不會卡在舊百分比。
+    """
+    if _last_good is None:
+        return ClaudeOfficial(error=error)
+    g = _last_good
+    return ClaudeOfficial(
+        ok=True,
+        five_hour_pct=_util(g.five_hour_pct, g.five_hour_reset),
+        weekly_pct=_util(g.weekly_pct, g.weekly_reset),
+        five_hour_reset=g.five_hour_reset,
+        weekly_reset=g.weekly_reset,
+        plan=g.plan,
+        error=error,
+        stale=True,
+        updated_at=g.updated_at,
+    )
+
+
 def fetch_official() -> ClaudeOfficial:
+    global _last_good, _cooldown_until
+
+    # 失敗冷卻中：直接回快取，不再打網路（減少 429）。
+    if time.time() < _cooldown_until and _last_good is not None:
+        return _cached("冷卻中（沿用上次官方值）")
+
     oauth = _read_oauth()
     if not oauth:
-        return ClaudeOfficial(error="讀不到 Claude 憑證（Keychain）")
+        return _cached("讀不到 Claude 憑證（Keychain）")
 
     token = oauth.get("accessToken")
     if not token:
-        return ClaudeOfficial(error="憑證缺少 accessToken")
+        return _cached("憑證缺少 accessToken")
 
     headers = dict(_HEADERS)
     headers["Authorization"] = f"Bearer {token}"
@@ -92,18 +128,22 @@ def fetch_official() -> ClaudeOfficial:
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.load(resp)
     except urllib.error.HTTPError as e:
+        # 429（限流）/ 5xx：進入冷卻並沿用上次官方值
         # 401 多半代表 token 過期，待 Claude Code 下次刷新即可恢復
-        return ClaudeOfficial(error=f"API 回應 {e.code}")
+        if e.code == 429 or e.code >= 500:
+            _cooldown_until = time.time() + _FAIL_COOLDOWN
+        return _cached(f"API 回應 {e.code}")
     except (urllib.error.URLError, TimeoutError, OSError) as e:
-        return ClaudeOfficial(error=f"連線失敗：{e}")
+        _cooldown_until = time.time() + _FAIL_COOLDOWN
+        return _cached(f"連線失敗：{e}")
     except json.JSONDecodeError:
-        return ClaudeOfficial(error="回應格式無法解析")
+        return _cached("回應格式無法解析")
 
     fh = data.get("five_hour") or {}
     sd = data.get("seven_day") or {}
     five_hour_reset = _parse_iso(fh.get("resets_at", ""))
     weekly_reset = _parse_iso(sd.get("resets_at", ""))
-    return ClaudeOfficial(
+    result = ClaudeOfficial(
         ok=True,
         five_hour_pct=_util(fh.get("utilization"), five_hour_reset),
         weekly_pct=_util(sd.get("utilization"), weekly_reset),
@@ -111,7 +151,12 @@ def fetch_official() -> ClaudeOfficial:
         weekly_reset=weekly_reset,
         plan=str(oauth.get("subscriptionType", "") or ""),
         error="",
+        stale=False,
+        updated_at=time.time(),
     )
+    _last_good = result
+    _cooldown_until = 0.0  # 成功即解除冷卻
+    return result
 
 
 def _util(value, reset_at: int) -> float:
