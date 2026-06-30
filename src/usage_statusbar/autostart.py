@@ -56,10 +56,13 @@ def is_enabled() -> bool:
 
 
 def enable() -> None:
-    """寫入/更新 plist 並向 launchd 註冊，使登入時自動啟動。"""
+    """寫入/更新 plist 並向 launchd 註冊，使登入時自動啟動。
+
+    只做 `load`（不 unload）：若 agent 已載入會是 no-op（被忽略），
+    不會把目前正在跑的程序砍掉重啟；plist 內容變更於下次登入生效。
+    （安裝/升級時的強制重載交由 install.sh 處理。）
+    """
     _write_plist()
-    # 重新載入定義（讓 KeepAlive=false 等變更立即生效）；失敗不致命。
-    _launchctl("unload", PLIST_PATH)
     _launchctl("load", PLIST_PATH)
 
 
