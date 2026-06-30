@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
+import threading
+
 import rumps
+from Foundation import NSOperationQueue
 
 from . import autostart
 from . import format as fmt
@@ -95,14 +98,15 @@ class UsageStatusBarApp(rumps.App):
         self._parts: list[str] = []
         self._has_data = False
         self._phase = 0
+        self._flashing = False  # 是否正在閃爍（≥90%）
+        self._fetching = False  # 是否有背景抓取進行中（避免重疊）
 
-        # 資料定時器（慢：讀檔 + 連網）
+        # 資料定時器（慢：讀檔 + 連網，於背景執行緒進行）
         self.timer = rumps.Timer(self.on_tick, self.cfg["refresh_seconds"])
         self.timer.start()
-        # 動畫定時器（快：只重繪標題，讓臨界紅塊閃爍）
+        # 動畫定時器（快：只在閃爍時啟動，平時停用以省電）
         self.anim_timer = rumps.Timer(self.on_anim, 0.5)
-        self.anim_timer.start()
-        # 啟動即先抓一次
+        # 啟動即先抓一次（背景）
         self.refresh()
 
     # -- 事件 --------------------------------------------------------------
@@ -110,12 +114,24 @@ class UsageStatusBarApp(rumps.App):
         self.refresh()
 
     def on_refresh(self, _sender) -> None:
-        self.refresh()
+        # 手動刷新：強制重抓官方（繞過失敗冷卻一次）
+        self.refresh(force=True)
 
     def on_anim(self, _timer) -> None:
-        # 只在臨界（紅塊）時需要閃爍；其餘狀態重繪結果相同、成本極低
+        # 只在閃爍狀態才會啟動此定時器；切換相位並重繪紅塊
         self._phase ^= 1
         self._render_title()
+
+    def _set_flashing(self, on: bool) -> None:
+        """依是否臨界，啟動/停用動畫定時器（平時停用以省電）。"""
+        if on and not self._flashing:
+            self._flashing = True
+            self.anim_timer.start()
+        elif not on and self._flashing:
+            self._flashing = False
+            self.anim_timer.stop()
+            self._phase = 0
+            self._render_title()
 
     def on_toggle_claude(self, sender) -> None:
         sender.state = not sender.state
@@ -185,12 +201,33 @@ class UsageStatusBarApp(rumps.App):
         subprocess.Popen(["open", "-R", CONFIG_PATH])
 
     # -- 核心 --------------------------------------------------------------
-    def refresh(self) -> None:
+    def refresh(self, force: bool = False) -> None:
+        """在背景執行緒讀檔 + 連網，避免阻塞主執行緒（選單卡頓）。"""
+        if self._fetching:
+            return
+        self._fetching = True
+        use_official = bool(self.cfg.get("use_official_claude", True))
+        threading.Thread(
+            target=self._fetch_worker, args=(use_official, force), daemon=True
+        ).start()
+
+    def _fetch_worker(self, use_official: bool, force: bool) -> None:
         try:
-            snap = readers.read_all(use_official=bool(self.cfg.get("use_official_claude", True)))
+            snap = readers.read_all(use_official=use_official, force=force)
+            err = None
         except Exception as exc:  # 保底：任何讀取錯誤都不該讓 App 崩潰
+            snap, err = None, exc
+        # 回主執行緒更新 UI（PyObjC 物件不可在背景執行緒操作）
+        NSOperationQueue.mainQueue().addOperationWithBlock_(
+            lambda: self._apply_result(snap, err)
+        )
+
+    def _apply_result(self, snap, err) -> None:
+        self._fetching = False
+        if err is not None:
             self.title = "AI ⚠️"
-            self.item_updated.title = i18n.t("read_error", exc=exc)
+            self.item_updated.title = i18n.t("read_error", exc=err)
+            self._set_flashing(False)
             return
 
         self._update_claude(snap.claude, snap.claude_official)
@@ -258,28 +295,24 @@ class UsageStatusBarApp(rumps.App):
 
     def _update_codex(self, x: readers.CodexUsage) -> None:
         if not x.ok:
-            self.item_codex_5h.title = _line("lbl_5h", x.error or i18n.t("no_data"))
-            self.item_codex_week.title = _line("lbl_weekly", i18n.t("dash"))
+            self.item_codex_5h.title = "  " + i18n.t("lbl_5h") + i18n.t("colon") + (
+                x.error or i18n.t("no_data")
+            )
+            self.item_codex_week.title = "  " + i18n.t("lbl_weekly") + i18n.t("colon") + i18n.t("dash")
             self.item_codex_plan.title = _line("lbl_plan", i18n.t("dash"))
             return
 
-        if x.primary:
-            self.item_codex_5h.title = _line(
-                "lbl_5h",
-                f"{fmt.fmt_pct(x.primary.used_percent)}  ·  {fmt.fmt_reset(x.primary.resets_at)}",
-            )
-        else:
-            self.item_codex_5h.title = _line("lbl_5h", i18n.t("dash"))
-
-        if x.secondary:
-            self.item_codex_week.title = _line(
-                "lbl_weekly",
-                f"{fmt.fmt_pct(x.secondary.used_percent)}  ·  {fmt.fmt_reset(x.secondary.resets_at)}",
-            )
-        else:
-            self.item_codex_week.title = _line("lbl_weekly", i18n.t("dash"))
-
+        self.item_codex_5h.title = self._codex_window_line(x.primary, "lbl_5h")
+        self.item_codex_week.title = self._codex_window_line(x.secondary, "lbl_weekly")
         self.item_codex_plan.title = _line("lbl_plan", x.plan_type or i18n.t("dash"))
+
+    def _codex_window_line(self, w: readers.CodexWindow | None, fallback_key: str) -> str:
+        """以視窗實際長度（window_minutes）決定標籤，而非寫死 5 小時/每週。"""
+        if w is None:
+            return "  " + i18n.t(fallback_key) + i18n.t("colon") + i18n.t("dash")
+        label = i18n.codex_window_label(w.window_minutes)
+        value = f"{fmt.fmt_pct(w.used_percent)}  ·  {fmt.fmt_reset(w.resets_at)}"
+        return f"  {label}{i18n.t('colon')}{value}"
 
     def _update_title(self, snap: readers.Snapshot) -> None:
         parts: list[str] = []
@@ -313,6 +346,8 @@ class UsageStatusBarApp(rumps.App):
         self._parts = parts
         self._has_data = bool(parts)
         self._render_title()
+        # 只有臨界（≥90%）才需要閃爍動畫，其餘狀態停用定時器以省電
+        self._set_flashing(self._has_data and worst >= 90)
 
     def _render_title(self) -> None:
         if not self._has_data:
