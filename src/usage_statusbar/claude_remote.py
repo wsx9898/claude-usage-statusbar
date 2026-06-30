@@ -107,11 +107,12 @@ def _cached(error: str) -> ClaudeOfficial:
     )
 
 
-def fetch_official() -> ClaudeOfficial:
+def fetch_official(force: bool = False) -> ClaudeOfficial:
+    """抓取官方用量。force=True（手動重新整理）時忽略失敗冷卻，強制重打。"""
     global _last_good, _cooldown_until
 
-    # 失敗冷卻中：直接回快取，不再打網路（減少 429）。
-    if time.time() < _cooldown_until and _last_good is not None:
+    # 失敗冷卻中：直接回快取，不再打網路（減少 429）。手動刷新可繞過一次。
+    if not force and time.time() < _cooldown_until and _last_good is not None:
         return _cached("冷卻中（沿用上次官方值）")
 
     oauth = _read_oauth()
