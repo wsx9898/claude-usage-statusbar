@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import math
+
 _CELLS = 5
 
 # 各形狀的四色階：[綠 <50, 黃 50–69, 橘 70–89, 紅 ≥90]
@@ -27,7 +29,8 @@ def fuel_bar(worst: float) -> str:
         filled = 0
     else:
         remaining = 100.0 - worst
-        filled = max(1, round(remaining / 20.0))  # 每格 20%；未滿額至少留 1 格
+        # 每格代表一個 20% 區段，該段沒用完就不掉格（無條件進位）；未滿額至少留 1 格。
+        filled = max(1, math.ceil(remaining / 20.0))
     filled = min(_CELLS, filled)
     return "▰" * filled + "▱" * (_CELLS - filled)
 
