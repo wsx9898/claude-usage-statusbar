@@ -186,8 +186,10 @@ class UsageStatusBarApp(rumps.App):
             with open(CONFIG_PATH, "w", encoding="utf-8") as f:
                 f.write(
                     '{\n'
-                    '  "refresh_seconds": 60,\n'
+                    '  "refresh_seconds": 20,\n'
+                    '  "official_refresh_seconds": 60,\n'
                     '  "language": "zh",\n'
+                    '  "use_official_claude": true,\n'
                     '  "claude_5h_token_limit": 0,\n'
                     '  "claude_weekly_token_limit": 0,\n'
                     '  "show_claude": true,\n'
@@ -203,13 +205,23 @@ class UsageStatusBarApp(rumps.App):
             return
         self._fetching = True
         use_official = bool(self.cfg.get("use_official_claude", True))
-        threading.Thread(
-            target=self._fetch_worker, args=(use_official, force), daemon=True
-        ).start()
-
-    def _fetch_worker(self, use_official: bool, force: bool) -> None:
+        official_interval = float(self.cfg.get("official_refresh_seconds", 60))
         try:
-            snap = readers.read_all(use_official=use_official, force=force)
+            threading.Thread(
+                target=self._fetch_worker,
+                args=(use_official, force, official_interval),
+                daemon=True,
+            ).start()
+        except RuntimeError:
+            # 執行緒起不來（極端情況）：還原旗標，讓下個 tick 能再試，
+            # 否則 _fetching 卡在 True 會讓 App 從此不再刷新。
+            self._fetching = False
+
+    def _fetch_worker(self, use_official: bool, force: bool, official_interval: float) -> None:
+        try:
+            snap = readers.read_all(
+                use_official=use_official, force=force, official_interval=official_interval
+            )
             err = None
         except Exception as exc:  # 保底：任何讀取錯誤都不該讓 App 崩潰
             snap, err = None, exc

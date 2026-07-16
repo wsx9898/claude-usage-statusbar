@@ -50,7 +50,7 @@
 | 工具 | 來源 | 取得方式 |
 |------|------|----------|
 | **Claude Code（官方）** | macOS Keychain 的 `Claude Code-credentials` + Anthropic API | 重用 Claude Code 已登入的 OAuth token，呼叫 `/usage` 同源端點 `GET /api/oauth/usage`，取得 5 小時 / 每週的**官方使用百分比**與重置時間 |
-| Claude Code（估算） | `~/.claude/projects/*/*.jsonl` | 彙整每筆訊息的 `usage`（input/output/cache tokens）與時間戳，算出滾動 5 小時 / 7 天的 token 與估算成本（成本參考 + 官方失敗時後備）|
+| Claude Code（估算） | `~/.claude/projects/*/*.jsonl` | 彙整每筆訊息的 `usage`（input/output/cache tokens）與時間戳，算出滾動 5 小時 / 7 天的 token 與估算成本（成本參考 + 官方失敗時後備）。同一則訊息重複出現在多個檔案時以 `requestId:message.id` 去重；快取寫入依 TTL 分級計價（5 分鐘 1.25x、1 小時 2x）|
 | Codex | `~/.codex/sessions/**/rollout-*.jsonl` | 讀取最新 `token_count` 事件的 `rate_limits`（5 小時窗、每週窗的 `used_percent`、`resets_at`、`plan_type`）— 官方回報的精準百分比 |
 
 ### 關於官方數字（與 `/usage` 一致）
@@ -159,7 +159,8 @@ bash run.sh
 
 ```json
 {
-  "refresh_seconds": 60,
+  "refresh_seconds": 20,
+  "official_refresh_seconds": 60,
   "language": "zh",
   "shape": "square",
   "use_official_claude": true,
@@ -170,7 +171,10 @@ bash run.sh
 }
 ```
 
-- `refresh_seconds`：重新整理間隔秒數（最小 15）。
+- `refresh_seconds`：UI 重新整理間隔秒數（預設 20、最小 10）。只做本機讀檔＋重繪，
+  解析結果有 mtime 快取、成本極低，開高頻率不傷磁碟。
+- `official_refresh_seconds`：官方 API 抓取的**最小間隔**（預設 60、最小 30）。
+  UI 刷新再頻繁，打 Anthropic API 也不會比這個密；間隔內沿用上次官方值＋本機推估。
 - `language`：介面語言，`"zh"`（中文，預設）或 `"en"`（English）。可在選單列「切換語言 / Language」即時切換。
 - `shape`：指示形狀，`"square"`（方形，預設）/ `"circle"`（圓形）/ `"heart"`（愛心）。可在選單列「圖示形狀」點擊循環。
 - `use_official_claude`：是否讀取 Claude 官方用量（預設 `true`）。設 `false` 則只用本機估算、

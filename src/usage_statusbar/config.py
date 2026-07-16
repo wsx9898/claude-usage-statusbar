@@ -21,7 +21,10 @@ CONFIG_DIR = os.path.expanduser("~/.config/claude-usage-statusbar")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 
 _DEFAULTS = {
-    "refresh_seconds": 60,
+    # UI 刷新間隔（讀本機檔＋重繪）。本機掃描有 mtime 快取、成本極低，可以開高頻率。
+    "refresh_seconds": 20,
+    # 官方 API 抓取的最小間隔：refresh 再頻繁，打 API 也不會比這個密。
+    "official_refresh_seconds": 60,
     "claude_5h_token_limit": 0,
     "claude_weekly_token_limit": 0,
     # 是否讀取 Claude 官方用量（重用 Keychain token，與 /usage 一致）。
@@ -50,9 +53,13 @@ def load_config() -> dict:
         pass
     # 安全範圍處理
     try:
-        cfg["refresh_seconds"] = max(15, int(cfg["refresh_seconds"]))
+        cfg["refresh_seconds"] = max(10, int(cfg["refresh_seconds"]))
     except (TypeError, ValueError):
-        cfg["refresh_seconds"] = 60
+        cfg["refresh_seconds"] = 20
+    try:
+        cfg["official_refresh_seconds"] = max(30, int(cfg["official_refresh_seconds"]))
+    except (TypeError, ValueError):
+        cfg["official_refresh_seconds"] = 60
     cfg["show_claude"] = bool(cfg.get("show_claude", True))
     cfg["show_codex"] = bool(cfg.get("show_codex", False))
     cfg["language"] = "en" if str(cfg.get("language", "zh")).lower() == "en" else "zh"

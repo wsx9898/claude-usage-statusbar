@@ -107,13 +107,22 @@ def _cached(error: str) -> ClaudeOfficial:
     )
 
 
-def fetch_official(force: bool = False) -> ClaudeOfficial:
-    """抓取官方用量。force=True（手動重新整理）時忽略失敗冷卻，強制重打。"""
+def fetch_official(force: bool = False, min_interval: float = 60.0) -> ClaudeOfficial:
+    """抓取官方用量。force=True（手動重新整理）時忽略節流/冷卻，強制重打。
+
+    min_interval：兩次成功抓取之間的最小間隔秒數。UI 的刷新頻率可以開得比它高，
+    間隔內直接沿用上次官方值（配合本機推估），不會多打 API。
+    """
     global _last_good, _cooldown_until
 
-    # 失敗冷卻中：直接回快取，不再打網路（減少 429）。手動刷新可繞過一次。
-    if not force and time.time() < _cooldown_until and _last_good is not None:
-        return _cached("冷卻中（沿用上次官方值）")
+    now = time.time()
+    if not force:
+        # 成功值仍在最小間隔內：直接沿用，不打網路（讓 UI 高頻刷新不會轟炸 API）。
+        if _last_good is not None and now - _last_good.updated_at < min_interval:
+            return _cached("間隔內（沿用上次官方值）")
+        # 失敗冷卻中：即使沒有快取值也不重打，避免啟動失敗後每個 tick 都連網。
+        if now < _cooldown_until:
+            return _cached("冷卻中（沿用上次官方值）")
 
     oauth = _read_oauth()
     if not oauth:
@@ -123,6 +132,11 @@ def fetch_official(force: bool = False) -> ClaudeOfficial:
     if not token:
         return _cached("憑證缺少 accessToken")
 
+    # 憑證已明確過期：打了必是 401，直接沿用快取，等 Claude Code 下次刷新 token。
+    expires_at = oauth.get("expiresAt")
+    if not force and isinstance(expires_at, (int, float)) and expires_at / 1000.0 < now:
+        return _cached("token 已過期（等待 Claude Code 刷新）")
+
     headers = dict(_HEADERS)
     headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(USAGE_URL, headers=headers, method="GET")
@@ -130,9 +144,9 @@ def fetch_official(force: bool = False) -> ClaudeOfficial:
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.load(resp)
     except urllib.error.HTTPError as e:
-        # 429（限流）/ 5xx：進入冷卻並沿用上次官方值
-        # 401 多半代表 token 過期，待 Claude Code 下次刷新即可恢復
-        if e.code == 429 or e.code >= 500:
+        # 429（限流）/ 5xx：進入冷卻並沿用上次官方值。
+        # 401 代表 token 過期，重試也不會好，同樣冷卻，等 Claude Code 刷新 token。
+        if e.code in (401, 429) or e.code >= 500:
             _cooldown_until = time.time() + _FAIL_COOLDOWN
         return _cached(f"API 回應 {e.code}")
     except (urllib.error.URLError, TimeoutError, OSError) as e:

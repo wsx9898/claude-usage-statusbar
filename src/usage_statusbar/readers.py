@@ -56,14 +56,18 @@ def _usage_tokens(usage: dict) -> int:
     )
 
 
-# 逐檔解析結果快取：path -> (mtime, [(ts, tokens, cost), ...])
+# 逐檔解析結果快取：path -> (mtime, [(ts, tokens, cost, dedup_key), ...])
 # 只在檔案 mtime 變動時重讀，避免每次刷新都重掃所有 7 天內的 jsonl（重度使用者的磁碟負擔）。
-_claude_file_cache: dict[str, tuple[float, list[tuple[float, int, float]]]] = {}
+_claude_file_cache: dict[str, tuple[float, list[tuple[float, int, float, str | None]]]] = {}
 
 
-def _parse_claude_file(path: str) -> list[tuple[float, int, float]]:
-    """解析單一 jsonl，回傳 [(時間, tokens, 成本), ...]。"""
-    recs: list[tuple[float, int, float]] = []
+def _parse_claude_file(path: str) -> list[tuple[float, int, float, str | None]]:
+    """解析單一 jsonl，回傳 [(時間, tokens, 成本, 去重鍵), ...]。
+
+    去重鍵 = requestId:message.id。同一則訊息可能重複出現在多個 jsonl
+    （重試、續接工作階段等），彙總時以此鍵去重，避免重複計算。
+    """
+    recs: list[tuple[float, int, float, str | None]] = []
     try:
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
@@ -83,7 +87,12 @@ def _parse_claude_file(path: str) -> list[tuple[float, int, float]]:
                 ts = _parse_ts(rec.get("timestamp", ""))
                 if ts is None:
                     continue
-                recs.append((ts, _usage_tokens(usage), pricing.estimate_cost(msg.get("model"), usage)))
+                req_id = rec.get("requestId")
+                msg_id = msg.get("id")
+                key = f"{req_id}:{msg_id}" if req_id and msg_id else None
+                recs.append(
+                    (ts, _usage_tokens(usage), pricing.estimate_cost(msg.get("model"), usage), key)
+                )
     except OSError:
         return []
     return recs
@@ -106,6 +115,7 @@ def read_claude_usage() -> ClaudeUsage:
 
     found_any = False
     seen: set[str] = set()
+    seen_msgs: set[str] = set()  # 跨檔去重（同一則訊息可能出現在多個 jsonl）
     for path in files:
         try:
             # 只看 7 天內有更新過的檔案，省去掃描歷史檔
@@ -123,9 +133,13 @@ def read_claude_usage() -> ClaudeUsage:
             recs = _parse_claude_file(path)
             _claude_file_cache[path] = (mtime, recs)
 
-        for ts, tokens, cost in recs:
+        for ts, tokens, cost, key in recs:
             if ts < cutoff_7d:
                 continue
+            if key is not None:
+                if key in seen_msgs:
+                    continue
+                seen_msgs.add(key)
             found_any = True
             result.tokens_7d += tokens
             result.cost_7d += cost
@@ -169,8 +183,29 @@ def _newest_codex_files(limit: int = 6) -> list[str]:
     return files[:limit]
 
 
+# Codex rollout 檔解析快取：path -> (mtime, result)。檔案沒更新就不重讀。
+_codex_file_cache: dict[str, tuple[float, tuple[dict, float] | None]] = {}
+
+
 def _extract_rate_limits(path: str) -> tuple[dict, float] | None:
-    """回傳檔案中最後一個含 rate_limits 的 token_count 事件。"""
+    """回傳檔案中最後一個含 rate_limits 的 token_count 事件（依 mtime 快取）。"""
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    cached = _codex_file_cache.get(path)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    found = _scan_rate_limits(path)
+    _codex_file_cache[path] = (mtime, found)
+    # 只保留最近掃過的少數檔案，避免快取無限成長
+    if len(_codex_file_cache) > 32:
+        for stale in list(_codex_file_cache)[:-16]:
+            del _codex_file_cache[stale]
+    return found
+
+
+def _scan_rate_limits(path: str) -> tuple[dict, float] | None:
     last = None
     last_ts = 0.0
     try:
@@ -306,9 +341,11 @@ def _project_one(
     return min(100.0, cached_pct + delta * ratio)
 
 
-def read_all(use_official: bool = True, force: bool = False) -> Snapshot:
+def read_all(
+    use_official: bool = True, force: bool = False, official_interval: float = 60.0
+) -> Snapshot:
     official = (
-        claude_remote.fetch_official(force=force)
+        claude_remote.fetch_official(force=force, min_interval=official_interval)
         if use_official
         else claude_remote.ClaudeOfficial()
     )
