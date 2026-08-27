@@ -56,3 +56,93 @@ def render(worst: float, has_data: bool, shape: str = "square") -> str:
     if not has_data:
         return indicator(worst, has_data, shape)
     return indicator(worst, has_data, shape) + fuel_bar(worst)
+
+
+# ---------------------------------------------------------------------------
+# Windows 系統匣點陣圖（macOS 選單列可直接顯示文字，Windows 系統匣只吃圖示，
+# 沒有等效的「文字標題」，所以用 Pillow 把顏色＋百分比畫成一張小圖）
+# ---------------------------------------------------------------------------
+
+# 各形狀的四色階（十六進位色碼版，對應 emoji 的顏色觀感）
+_TIERS_RGB: dict[str, list[str]] = {
+    "square": ["#3DD65C", "#FFD426", "#FF9F1A", "#FF3B30"],
+    "circle": ["#34C759", "#FFCC00", "#FF9500", "#FF3B30"],
+    "heart": ["#34C759", "#FFCC00", "#FF9500", "#FF3B30"],
+}
+_GRAY = "#9AA0A6"  # 無資料時的佔位色
+
+_FONT_CANDIDATES = (
+    "seguisb.ttf",  # Segoe UI Semibold（Windows 內建）
+    "segoeuib.ttf",  # Segoe UI Bold
+    "arialbd.ttf",  # Arial Bold
+    "arial.ttf",
+    "DejaVuSans-Bold.ttf",
+)
+
+
+def _tier_color(worst: float, shape: str) -> str:
+    tiers = _TIERS_RGB.get(shape, _TIERS_RGB["square"])
+    if worst >= 90:
+        return tiers[3]
+    if worst >= 70:
+        return tiers[2]
+    if worst >= 50:
+        return tiers[1]
+    return tiers[0]
+
+
+def _load_font(size: int):
+    from PIL import ImageFont
+
+    for name in _FONT_CANDIDATES:
+        try:
+            return ImageFont.truetype(name, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def _draw_shape(draw, shape: str, box: tuple[int, int, int, int], color: str) -> None:
+    x0, y0, x1, y1 = box
+    if shape == "circle":
+        draw.ellipse(box, fill=color)
+    elif shape == "heart":
+        w, h = x1 - x0, y1 - y0
+        cx = (x0 + x1) / 2
+        r = w / 4
+        draw.ellipse((x0, y0, x0 + 2 * r, y0 + 2 * r), fill=color)
+        draw.ellipse((x1 - 2 * r, y0, x1, y0 + 2 * r), fill=color)
+        draw.polygon(
+            [(x0, y0 + r), (cx, y1), (x1, y0 + r)],
+            fill=color,
+        )
+    else:  # square（實際上畫成圓角矩形，比較耐看）
+        radius = min(x1 - x0, y1 - y0) // 5
+        draw.rounded_rectangle(box, radius=radius, fill=color)
+
+
+def render_image(worst: float, has_data: bool, shape: str = "square", size: int = 64):
+    """畫出系統匣用的彩色形狀＋百分比點陣圖，回傳 PIL.Image。"""
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    pad = max(2, size // 16)
+    box = (pad, pad, size - pad, size - pad)
+
+    if not has_data:
+        _draw_shape(draw, shape, box, _GRAY)
+        text = "…"
+    else:
+        color = _tier_color(worst, shape)
+        _draw_shape(draw, shape, box, color)
+        pct = max(0, min(99, int(worst)))
+        text = str(pct)
+
+    font = _load_font(size // 2 if len(text) <= 2 else size // 3)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    tx = (size - tw) / 2 - bbox[0]
+    ty = (size - th) / 2 - bbox[1]
+    draw.text((tx, ty), text, font=font, fill="#FFFFFF")
+    return img
