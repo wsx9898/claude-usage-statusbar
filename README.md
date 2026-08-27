@@ -1,10 +1,12 @@
 # claude-usage-statusbar
 
-放在 macOS 右上角選單列的輕量「AI 用量監看」工具。它是一個**本機儀表板**，
+放在選單列（macOS）／系統匣（Windows）的輕量「AI 用量監看」工具。它是一個**本機儀表板**，
 透過讀取本機快取檔，監看你的 **Claude Code** 與 **Codex** 用量／額度。
 
-> 主要靠讀取 `~/.claude`、`~/.codex` 的本機檔案與 macOS Keychain；**不需要另外登入**。
+> 主要靠讀取 `~/.claude`、`~/.codex` 的本機檔案，以及作業系統存放 Claude Code 登入憑證的地方
+> （macOS 是 Keychain，Windows 是 `%USERPROFILE%\.claude\.credentials.json`）；**不需要另外登入**。
 > 取 Claude 官方用量時會用既有 token 打一次 Anthropic 的 usage 端點（可在設定關閉，見下方）。
+> macOS 安裝／使用見下方「安裝（macOS）」，Windows 見「Windows 支援」。
 
 ## 它顯示什麼
 
@@ -80,7 +82,7 @@
 - **完全可關閉**：把 `use_official_claude` 設為 `false`，就連這唯一的對外連線與 Keychain 讀取都不會發生。
 - Codex 與 Claude 估算的數據**全程只在本機讀取**，不對外傳送。
 
-## 安裝（含登入自動啟動）
+## 安裝（macOS，含登入自動啟動）
 
 需求：macOS、Python 3（`python3`）。
 
@@ -111,7 +113,7 @@ bash uninstall.sh          # 移除 LaunchAgent，保留執行副本
 bash uninstall.sh --purge  # 一併刪除執行副本與 venv
 ```
 
-## 手動執行（不安裝自動啟動）
+## 手動執行（macOS，不安裝自動啟動）
 
 ```bash
 bash run.sh
@@ -119,7 +121,7 @@ bash run.sh
 
 第一次執行會自動建立 `.venv` 並安裝相依套件，之後直接啟動。
 
-## 啟動、關閉、重新開啟
+## 啟動、關閉、重新開啟（macOS）
 
 | 情況 | 會怎樣 / 該怎麼做 |
 |------|------------------|
@@ -191,22 +193,30 @@ bash run.sh
 ```
 claude-usage-statusbar/
 ├── src/usage_statusbar/
-│   ├── app.py          # rumps 選單列 App（UI / 定時器）
-│   ├── readers.py      # 讀取 Claude / Codex 本機快取（估算）
-│   ├── claude_remote.py # 重用 Keychain token 取 Claude 官方用量
-│   ├── icon.py         # 燃料量表圖示（彩色形狀 + ▰◧▱ 能量條）
-│   ├── autostart.py    # 管理 LaunchAgent（開機自動啟動開關）
-│   ├── i18n.py         # 中英文字串表（介面語言切換）
-│   ├── pricing.py      # 模型估價表
-│   ├── format.py     # 顯示格式化
-│   └── config.py     # 設定檔讀取 / 寫入
-├── run.sh            # 啟動器（建立 venv + 啟動）
-├── install.sh        # 安裝 LaunchAgent（登入自動啟動；KeepAlive=false）
-├── uninstall.sh      # 解除安裝
-└── requirements.txt
+│   ├── app.py             # 平台分派層（依 sys.platform 選 app_macos / app_windows）
+│   ├── app_macos.py       # rumps 選單列 App（UI / 定時器）
+│   ├── app_windows.py     # pystray 系統匣 App（UI / 背景執行緒）
+│   ├── readers.py         # 讀取 Claude / Codex 本機快取（估算，跨平台）
+│   ├── claude_remote.py   # 重用已登入 token 取 Claude 官方用量（macOS 讀 Keychain／其他讀憑證檔）
+│   ├── icon.py            # 燃料量表圖示：macOS 版 emoji 字串 + Windows 版點陣圖
+│   ├── autostart.py       # 平台分派層（依 sys.platform 選 autostart_macos / autostart_windows）
+│   ├── autostart_macos.py   # 管理 LaunchAgent（開機自動啟動開關）
+│   ├── autostart_windows.py # 管理 HKCU Run 機碼（開機自動啟動開關）
+│   ├── i18n.py            # 中英文字串表（介面語言切換）
+│   ├── pricing.py         # 模型估價表
+│   ├── format.py          # 顯示格式化
+│   └── config.py          # 設定檔讀取 / 寫入
+├── run.sh                 # 啟動器 - macOS/Linux（建立 venv + 啟動）
+├── install.sh             # 安裝 LaunchAgent - macOS（登入自動啟動；KeepAlive=false）
+├── uninstall.sh           # 解除安裝 - macOS
+├── run_windows.bat        # 啟動器 - Windows（建立 venv + 啟動）
+├── install_windows.bat    # 安裝 - Windows（建立 venv + 設定登入自動啟動）
+├── uninstall_windows.bat  # 解除安裝 - Windows
+├── run_hidden.vbs         # Windows 登入自動啟動用：隱藏視窗執行 run_windows.bat
+└── requirements.txt       # 依平台標記（rumps 僅 macOS；pystray/Pillow 僅 Windows）
 ```
 
-## 疑難排解
+## 疑難排解（macOS）
 
 - 看不到圖示：確認登入的是有畫面的桌面工作階段；查看記錄檔
   `~/Library/Logs/com.user.claude-usage-statusbar.log`。
@@ -214,15 +224,52 @@ claude-usage-statusbar/
 - Claude 顯示「官方數字不可用」：多半是 token 暫時過期（再開一下 Claude Code 就會刷新），
   或 Keychain 授權被取消；會自動退回估算，不影響運作。
 
-## Windows 支援（目前僅 macOS）
+## Windows 支援
 
-目前只支援 macOS。核心的「讀檔解析 + 估價」邏輯（`readers.py`、`pricing.py`、`config.py`、`format.py`）
-是跨平台的，要移植到 Windows 主要改三塊與系統綁定的部分：
+Windows 版是系統匣（工作列右下角）圖示，功能與 macOS 選單列版對等：一樣讀取
+`~/.claude`、`~/.codex` 的本機檔案，一樣重用 Claude Code 已登入的 OAuth token
+取官方用量（Windows 上這組憑證存在 `%USERPROFILE%\.claude\.credentials.json`，
+不是 Keychain，是明文 JSON 檔）。三處與系統綁定的實作已改為 Windows 版本：
 
-1. **選單列 / 系統匣 UI**：`rumps` 只支援 macOS → 改用 `pystray`（搭配 `Pillow`）之類的系統匣套件。
-2. **讀官方用量的憑證**：macOS 用 `security` 讀 Keychain → Windows 需改讀 Windows 認證管理員
-   或 Claude Code 在 Windows 的憑證存放位置。
-3. **開機自動啟動**：macOS 用 LaunchAgent（plist）→ Windows 改用「工作排程器」或啟動資料夾捷徑。
+| 功能 | macOS | Windows |
+|------|-------|---------|
+| 選單列 / 系統匣 UI | `rumps` | `pystray` + `Pillow`（把彩色形狀＋使用率百分比畫成圖示；Windows 系統匣沒有文字標題，改放在滑鼠移過去的提示文字） |
+| 官方用量憑證 | Keychain（`security` 指令） | `%USERPROFILE%\.claude\.credentials.json` |
+| 開機自動啟動 | LaunchAgent（plist） | 登入啟動機碼 `HKCU\...\Run`（透過隱藏的 `run_hidden.vbs`，避免彈出命令提示字元視窗）|
 
-檔案路徑用的是 `~`（`os.path.expanduser`），在 Windows 也能解析，多半不用大改。
-需要 Windows 版時再跟我說。
+需求：Windows 10/11、Python 3（[python.org](https://www.python.org/downloads/) 下載時記得勾選
+「Add python.exe to PATH」）。
+
+### 安裝（含登入自動啟動）
+
+```bat
+cd claude-usage-statusbar
+install_windows.bat
+```
+
+會建立 `.venv`、安裝相依套件（`pystray`、`Pillow`）、設定登入時自動啟動，並立刻啟動 App。
+圖示會出現在工作列右下角的系統匣（沒看到就點展開箭頭「顯示隱藏的圖示」，可拖曳釘選出來）。
+
+解除安裝：
+
+```bat
+uninstall_windows.bat          rem 移除登入自動啟動設定，保留 .venv
+uninstall_windows.bat --purge  rem 一併刪除 .venv
+```
+
+### 手動執行（不安裝自動啟動）
+
+```bat
+run_windows.bat
+```
+
+用一般的 `python.exe`（非 `pythonw.exe`）啟動，會保留命令提示字元視窗顯示輸出，
+方便第一次執行或疑難排解時看錯誤訊息。第一次執行會自動建立 `.venv` 並安裝相依套件。
+
+### 疑難排解
+
+- **系統匣看不到圖示**：多半是點了「顯示隱藏的圖示」箭頭後才看得到；也可能是
+  `install_windows.bat` 執行中出錯，改用 `run_windows.bat` 手動執行看錯誤訊息。
+- **Claude 顯示「官方數字不可用」**：確認電腦上有登入過的 Claude Code CLI
+  （`%USERPROFILE%\.claude\.credentials.json` 要存在），或等 Claude Code 下次刷新 token。
+- 想同時監看 Codex：在系統匣選單勾選「顯示 Codex」，跟 macOS 版一樣。

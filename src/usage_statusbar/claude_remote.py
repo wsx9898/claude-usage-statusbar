@@ -1,6 +1,7 @@
 """讀取 Claude 官方用量（與 `claude /usage` 同源）。
 
-做法：重用 Claude Code 已登入、存在 macOS Keychain 的 OAuth token，
+做法：重用 Claude Code 已登入的 OAuth token（macOS 存在 Keychain；
+Windows / Linux 存在 `~/.claude/.credentials.json` 明文檔），
 呼叫 Claude Code 內部用來查 /usage 的同一個端點：
     GET https://api.anthropic.com/api/oauth/usage
 
@@ -17,7 +18,9 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -55,7 +58,19 @@ _FAIL_COOLDOWN = 120.0  # 秒
 
 
 def _read_oauth() -> dict | None:
-    """從 Keychain 取出 claudeAiOauth 區塊。失敗回 None。"""
+    """取出 claudeAiOauth 區塊。失敗回 None。
+
+    macOS：Claude Code 把憑證存在 Keychain，用 `security` 指令讀取。
+    其他平台（Windows / Linux）：Claude Code 沒有系統金鑰圈可用，
+    改把憑證存成明文檔案 `~/.claude/.credentials.json`
+    （或 `$CLAUDE_CONFIG_DIR/.credentials.json`，若有設定該環境變數）。
+    """
+    if sys.platform == "darwin":
+        return _read_oauth_keychain()
+    return _read_oauth_file()
+
+
+def _read_oauth_keychain() -> dict | None:
     try:
         out = subprocess.run(
             ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
@@ -70,6 +85,18 @@ def _read_oauth() -> dict | None:
     try:
         data = json.loads(out.stdout)
     except json.JSONDecodeError:
+        return None
+    oauth = data.get("claudeAiOauth")
+    return oauth if isinstance(oauth, dict) else None
+
+
+def _read_oauth_file() -> dict | None:
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    path = os.path.join(config_dir, ".credentials.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
         return None
     oauth = data.get("claudeAiOauth")
     return oauth if isinstance(oauth, dict) else None
