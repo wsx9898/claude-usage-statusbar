@@ -1,47 +1,45 @@
 #!/bin/bash
-# 安裝 LaunchAgent：登入時自動啟動（RunAtLoad）。
+# macOS 安裝：編譯 Swift 版選單列 App，安裝到 ~/Applications，並設定登入自動啟動（LaunchAgent）。
 # KeepAlive=false：從選單列「結束」即永久關閉，launchd 不會把它拉回來；
 # 是否登入自動啟動可在選單列「開機時自動啟動」切換。
 #
-# 重要：macOS 會對 ~/Documents、~/Desktop、~/Downloads 等位置做 TCC 權限保護，
-# 由 launchd 啟動的程序無法在這些位置「執行」程式碼（會出現 Operation not permitted）。
-# 因此安裝時會把執行用的副本部署到不受保護的：
-#   ~/Library/Application Support/claude-usage-statusbar/
-# 開發用原始碼仍可放在 ~/Documents 的 git 倉庫中；此處只是部署一份執行副本。
+# 需求：Xcode Command Line Tools（`xcode-select --install`，提供 swift 編譯器）。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LABEL="com.user.claude-usage-statusbar"
+NAME="ClaudeUsageStatusBar"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs"
-APP_HOME="$HOME/Library/Application Support/claude-usage-statusbar"
+APP_DIR="$HOME/Applications"
+APP="$APP_DIR/$NAME.app"
+LEGACY_HOME="$HOME/Library/Application Support/claude-usage-statusbar"  # 舊 Python 版的執行副本
 
-mkdir -p "$HOME/Library/LaunchAgents" "$LOG_DIR" "$APP_HOME"
+if ! command -v swift >/dev/null 2>&1; then
+  echo "[install] 找不到 swift，請先執行：xcode-select --install" >&2
+  exit 1
+fi
 
-# 1) 部署執行副本到不受 TCC 保護的位置
-echo "[install] 部署執行副本到：$APP_HOME"
-rm -rf "$APP_HOME/src"
-cp -R "$SCRIPT_DIR/src" "$APP_HOME/src"
-cp "$SCRIPT_DIR/run.sh" "$APP_HOME/run.sh"
-cp "$SCRIPT_DIR/requirements.txt" "$APP_HOME/requirements.txt"
-chmod +x "$APP_HOME/run.sh"
+# 1) 編譯
+echo "[install] 編譯 Swift 版（首次約需 1 分鐘）…"
+BUILT="$(bash "$SCRIPT_DIR/macos/build.sh" | tail -n 1)"
 
-# 2) 在副本位置預先建立 venv 與相依套件（此時由 Terminal 執行，具備存取權）
-echo "[install] 建立執行環境（首次會安裝 rumps，請稍候）…"
-PYTHON_BIN="${PYTHON_BIN:-python3}" bash "$APP_HOME/run.sh" &
-SETUP_PID=$!
-# 等待 venv 與套件就緒（最多 ~90 秒），就緒後即可結束這個前置啟動
-for _ in $(seq 1 90); do
-  if "$APP_HOME/.venv/bin/python" -c "import rumps" >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
-sleep 2
-kill "$SETUP_PID" >/dev/null 2>&1 || true
-wait "$SETUP_PID" 2>/dev/null || true
+# 2) 停掉舊的執行個體（含舊 Python 版），再部署 .app
+launchctl unload "$PLIST" >/dev/null 2>&1 || true
+pkill -f "$APP/Contents/MacOS/$NAME" >/dev/null 2>&1 || true
+pkill -f "python.* -m usage_statusbar" >/dev/null 2>&1 || true
 
-# 3) 寫入 LaunchAgent，指向副本位置的 run.sh
+mkdir -p "$APP_DIR" "$HOME/Library/LaunchAgents" "$LOG_DIR"
+rm -rf "$APP"
+cp -R "$BUILT" "$APP"
+echo "[install] 已安裝：$APP"
+
+if [ -d "$LEGACY_HOME" ]; then
+  rm -rf "$LEGACY_HOME"
+  echo "[install] 已移除舊 Python 版執行副本：$LEGACY_HOME"
+fi
+
+# 3) 寫入 LaunchAgent（與 App 內「開機時自動啟動」寫出的內容相同）
 echo "[install] 寫入 LaunchAgent：$PLIST"
 cat > "$PLIST" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -52,8 +50,7 @@ cat > "$PLIST" <<PLIST_EOF
     <string>$LABEL</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>$APP_HOME/run.sh</string>
+        <string>$APP/Contents/MacOS/$NAME</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -69,11 +66,10 @@ cat > "$PLIST" <<PLIST_EOF
 </plist>
 PLIST_EOF
 
-# 4) 重新載入
-launchctl unload "$PLIST" >/dev/null 2>&1 || true
+# 4) 載入（RunAtLoad 會立刻啟動）
 launchctl load "$PLIST"
 
 echo "[install] 完成！App 已啟動並會在每次登入時自動執行。"
-echo "          執行副本：$APP_HOME"
+echo "          App：$APP"
 echo "          記錄檔：$LOG_DIR/$LABEL.log"
 echo "          解除安裝：bash uninstall.sh"

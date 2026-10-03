@@ -6,7 +6,7 @@
 > 主要靠讀取 `~/.claude`、`~/.codex` 的本機檔案，以及作業系統存放 Claude Code 登入憑證的地方
 > （macOS 是 Keychain，Windows 是 `%USERPROFILE%\.claude\.credentials.json`）；**不需要另外登入**。
 > 取 Claude 官方用量時會用既有 token 打一次 Anthropic 的 usage 端點（可在設定關閉，見下方）。
-> macOS 安裝／使用見下方「安裝（macOS）」，Windows 見「Windows 支援」。
+> macOS 版是**原生 Swift App**（見下方「安裝（macOS）」）；Windows 版仍為 Python（見「Windows 支援」）。
 
 ## 它顯示什麼
 
@@ -84,7 +84,8 @@
 
 ## 安裝（macOS，含登入自動啟動）
 
-需求：macOS、Python 3（`python3`）。
+需求：macOS 13+、Xcode Command Line Tools（提供 `swift` 編譯器；沒有的話 `xcode-select --install`）。
+**不再需要 Python。**
 
 ```bash
 cd claude-usage-statusbar
@@ -93,33 +94,36 @@ bash install.sh
 
 `install.sh` 會：
 
-1. 把執行用副本部署到 `~/Library/Application Support/claude-usage-statusbar/`，
-   並在該處建立隔離的 Python 虛擬環境（`.venv`）、安裝相依套件（`rumps`）。
-2. 安裝一個 **LaunchAgent**，設定 `RunAtLoad`（每次登入自動啟動）；`KeepAlive=false`，
+1. 用 `swift build -c release` 編譯 `macos/` 下的原生 Swift App，組成 `ClaudeUsageStatusBar.app`
+   （ad-hoc 簽章、`LSUIElement`，不出現在 Dock），安裝到 `~/Applications/`。
+2. 停掉舊的執行個體；若偵測到舊 Python 版的執行副本
+   （`~/Library/Application Support/claude-usage-statusbar/`）會一併移除。
+3. 安裝一個 **LaunchAgent**，設定 `RunAtLoad`（每次登入自動啟動）；`KeepAlive=false`，
    所以**從選單列「結束（永久關閉）」按下就真的關掉**，launchd 不會把它拉回來。
    是否「登入時自動啟動」可隨時在選單列「開機時自動啟動」切換。
 
 安裝後圖示會立刻出現在右上角，往後每次登入也會自動出現（除非關掉「開機時自動啟動」）。
-
-> **為何要部署副本？** macOS 的 TCC 權限會保護 `~/Documents`、`~/Desktop` 等位置，
-> 由 `launchd` 啟動的程序無法在這些位置「執行」程式碼（會出現 *Operation not permitted*）。
-> 因此安裝時會把執行副本放到不受保護的 `~/Library/Application Support`；
-> 你的 git 開發倉庫可繼續留在 `~/Documents`。改了原始碼後重新執行 `bash install.sh` 即可更新副本。
+改了原始碼後重新執行 `bash install.sh` 即可更新。
 
 解除安裝：
 
 ```bash
-bash uninstall.sh          # 移除 LaunchAgent，保留執行副本
-bash uninstall.sh --purge  # 一併刪除執行副本與 venv
+bash uninstall.sh          # 移除 LaunchAgent 並停止 App，保留 ~/Applications/ClaudeUsageStatusBar.app
+bash uninstall.sh --purge  # 一併刪除 .app
 ```
 
 ## 手動執行（macOS，不安裝自動啟動）
 
 ```bash
-bash run.sh
+bash macos/build.sh                       # 產出 macos/build/ClaudeUsageStatusBar.app
+open macos/build/ClaudeUsageStatusBar.app
 ```
 
-第一次執行會自動建立 `.venv` 並安裝相依套件，之後直接啟動。
+疑難排解時可用 `--dump` 只讀一次並印出結果（不開 UI）：
+
+```bash
+macos/build/ClaudeUsageStatusBar.app/Contents/MacOS/ClaudeUsageStatusBar --dump
+```
 
 ## 啟動、關閉、重新開啟（macOS）
 
@@ -127,17 +131,8 @@ bash run.sh
 |------|------------------|
 | **重開機 / 重新登入** | 若「開機時自動啟動」為開，會自動出現在右上角（`RunAtLoad`）。 |
 | **按選單「結束（永久關閉）」** | 立刻關閉，**不會自己回來**（`KeepAlive=false`）。下次登入是否自動開取決於「開機時自動啟動」。 |
-| **關掉後，想用 terminal 再開** | `launchctl kickstart gui/$(id -u)/com.user.claude-usage-statusbar`（自動啟動為開、agent 已載入時用這個最快）。 |
-| **若已關掉「開機時自動啟動」（agent 未載入）** | `bash "$HOME/Library/Application Support/claude-usage-statusbar/run.sh"`，或在選單把「開機時自動啟動」勾回來再 kickstart。 |
+| **關掉後想再開** | `open ~/Applications/ClaudeUsageStatusBar.app`（或在 Finder / Spotlight 直接開）。 |
 | **想要登入不再自動開** | 選單列取消勾選「開機時自動啟動」（移除 plist），或 `bash uninstall.sh`。 |
-| **只想臨時跑一次、不裝自動啟動** | `bash run.sh`。 |
-
-> **TL;DR：UI 結束之後要從終端機再開，用這一條：**
-> ```bash
-> launchctl kickstart gui/$(id -u)/com.user.claude-usage-statusbar
-> ```
-> 若你曾關掉「開機時自動啟動」（plist 被移除、agent 沒載入），上面那條會找不到服務，
-> 改用：`bash "$HOME/Library/Application Support/claude-usage-statusbar/run.sh"`。
 
 ## 分享給朋友（macOS）
 
@@ -146,10 +141,10 @@ bash run.sh
 
 給朋友的步驟：
 
-1. 把整個專案資料夾給他（用 Git 或壓縮檔皆可；**壓縮前先排除 `.venv/`** 以免肥大且綁路徑）。
-2. 他需要：macOS + `python3`（沒有的話 `brew install python`）。
+1. 把整個專案資料夾給他（用 Git 或壓縮檔皆可；**壓縮前先排除 `.venv/`、`macos/.build/`、`macos/build/`**）。
+2. 他需要：macOS 13+ 與 Xcode Command Line Tools（`xcode-select --install`）。
 3. 在資料夾內執行 `bash install.sh`。
-4. 首次會下載 `rumps`（約 6MB，需網路）；首次可能跳一次 Keychain 授權，按「一律允許」。
+4. 首次可能跳一次 Keychain 授權（`security` 想存取 Claude Code-credentials），按「一律允許」。
 
 > 程式碼本身**不含任何密鑰**——token 是執行時去各自的 Keychain 即時讀取，所以分享資料夾是安全的。
 > 朋友要看 Claude 官方數字，前提是他電腦上有登入過的 Claude Code；要看 Codex 則需有 Codex 的本機紀錄。
@@ -192,29 +187,29 @@ bash run.sh
 
 ```
 claude-usage-statusbar/
-├── src/usage_statusbar/
-│   ├── app.py             # 平台分派層（依 sys.platform 選 app_macos / app_windows）
-│   ├── app_macos.py       # rumps 選單列 App（UI / 定時器）
-│   ├── app_windows.py     # pystray 系統匣 App（UI / 背景執行緒）
-│   ├── readers.py         # 讀取 Claude / Codex 本機快取（估算，跨平台）
-│   ├── claude_remote.py   # 重用已登入 token 取 Claude 官方用量（macOS 讀 Keychain／其他讀憑證檔）
-│   ├── icon.py            # 燃料量表圖示：macOS 版 emoji 字串 + Windows 版點陣圖
-│   ├── autostart.py       # 平台分派層（依 sys.platform 選 autostart_macos / autostart_windows）
-│   ├── autostart_macos.py   # 管理 LaunchAgent（開機自動啟動開關）
-│   ├── autostart_windows.py # 管理 HKCU Run 機碼（開機自動啟動開關）
-│   ├── i18n.py            # 中英文字串表（介面語言切換）
-│   ├── pricing.py         # 模型估價表
-│   ├── format.py          # 顯示格式化
-│   └── config.py          # 設定檔讀取 / 寫入
-├── run.sh                 # 啟動器 - macOS/Linux（建立 venv + 啟動）
-├── install.sh             # 安裝 LaunchAgent - macOS（登入自動啟動；KeepAlive=false）
-├── uninstall.sh           # 解除安裝 - macOS
-├── run_windows.bat        # 啟動器 - Windows（建立 venv + 啟動）
-├── install_windows.bat    # 安裝 - Windows（建立 venv + 設定登入自動啟動）
-├── uninstall_windows.bat  # 解除安裝 - Windows
-├── run_hidden.vbs         # Windows 登入自動啟動用：隱藏視窗執行 run_windows.bat
-└── requirements.txt       # 依平台標記（rumps 僅 macOS；pystray/Pillow 僅 Windows）
+├── macos/                     # macOS 版：原生 Swift（AppKit NSStatusItem）
+│   ├── Package.swift
+│   ├── Info.plist             # LSUIElement（不出現在 Dock）
+│   ├── build.sh               # swift build + 組成 .app + ad-hoc 簽章
+│   └── Sources/ClaudeUsageStatusBar/
+│       ├── main.swift             # 進入點（含 --dump）
+│       ├── StatusBarController.swift  # 選單列 UI / 定時器
+│       ├── Readers.swift          # 讀取 Claude / Codex 本機快取 + 官方值推估
+│       ├── ClaudeRemote.swift     # 重用 Keychain token 取 Claude 官方用量
+│       ├── Icon.swift             # 燃料量表（emoji 形狀＋▰▱）
+│       ├── Autostart.swift        # 管理 LaunchAgent（開機自動啟動開關）
+│       ├── I18n.swift / Format.swift / Pricing.swift / Config.swift
+├── src/usage_statusbar/       # Windows 版：Python（pystray 系統匣）
+│   ├── app.py / app_windows.py
+│   ├── readers.py / claude_remote.py / icon.py / pricing.py / format.py / i18n.py / config.py
+│   └── autostart.py / autostart_windows.py
+├── install.sh / uninstall.sh  # macOS 安裝 / 解除安裝（編譯 Swift 版 + LaunchAgent）
+├── install_windows.bat / uninstall_windows.bat / run_windows.bat / run_hidden.vbs
+└── requirements.txt           # Windows 版相依（pystray / Pillow）
 ```
+
+> 兩個版本共用同一份設定檔格式（`~/.config/claude-usage-statusbar/config.json`）。
+> 修改計價表、字串或邏輯時，請記得 Swift 與 Python 兩邊同步。
 
 ## 疑難排解（macOS）
 
@@ -233,7 +228,7 @@ Windows 版是系統匣（工作列右下角）圖示，功能與 macOS 選單�
 
 | 功能 | macOS | Windows |
 |------|-------|---------|
-| 選單列 / 系統匣 UI | `rumps` | `pystray` + `Pillow`（把彩色形狀＋使用率百分比畫成圖示；Windows 系統匣沒有文字標題，改放在滑鼠移過去的提示文字） |
+| 選單列 / 系統匣 UI | 原生 Swift（AppKit `NSStatusItem`）| `pystray` + `Pillow`（把彩色形狀＋使用率百分比畫成圖示；Windows 系統匣沒有文字標題，改放在滑鼠移過去的提示文字） |
 | 官方用量憑證 | Keychain（`security` 指令） | `%USERPROFILE%\.claude\.credentials.json` |
 | 開機自動啟動 | LaunchAgent（plist） | 登入啟動機碼 `HKCU\...\Run`（透過隱藏的 `run_hidden.vbs`，避免彈出命令提示字元視窗）|
 

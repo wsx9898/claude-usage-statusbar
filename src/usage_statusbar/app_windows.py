@@ -1,12 +1,12 @@
 """Windows 系統匣（右下角）用量監看 App。
 
 用 pystray 建立系統匣圖示，定時讀取本機快取檔，顯示 Claude Code 與 Codex 的用量。
-與 macOS 版（app_macos.py，用 rumps）功能對等，但受限於 Windows 系統匣沒有
+與 macOS 版（macos/，原生 Swift）功能對等，但受限於 Windows 系統匣沒有
 「文字標題」這種東西（只有圖示＋滑鼠移過去的提示文字），所以：
 
 - 彩色形狀＋使用率百分比畫成一張小圖當系統匣圖示（見 icon.render_image）。
 - macOS 選單列上的「標題文字」改放到系統匣圖示的提示文字（title/tooltip）。
-- 選單裡的明細列改用文字置灰（enabled=False）的項目呈現，效果等同 rumps 版本。
+- 選單裡的明細列改用文字置灰（enabled=False）的項目呈現，效果等同 macOS 版本。
 """
 
 from __future__ import annotations
